@@ -1,0 +1,22 @@
+[workspace]
+authors = ["HoWilgh <wilfried.hortschitz@donau-uni.ac.at>"]
+channels = ["conda-forge"]
+name = "mammos-mumag-matrixfree"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+python = ">=3.14.0,<3.15"
+pip = ">=25.2,<26"
+numpy = ">=2.3.4,<3"
+scipy = ">=1.16.3,<2"
+matplotlib = ">=3.10.7,<4"
+pyamg = ">=5.3.0,<6"
+meshio = ">=5.3.5,<6"
+meshpy = ">=2025.1.1,<2026"
+
+[pypi-dependencies]
+jax = ">=0.8.0, <0.9"
+jaxopt = ">=0.8.5, <0.9"
