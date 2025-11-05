@@ -1,0 +1,15 @@
+name: mfree-mumag-gpu
+channels:
+  - conda-forge
+dependencies:
+  - python
+  - numpy
+  - scipy
+  - matplotlib
+  - pyamg
+  - meshio
+  - meshpy
+  - pip
+  - pip:
+      - jax[cuda12]
+      - jaxopt
