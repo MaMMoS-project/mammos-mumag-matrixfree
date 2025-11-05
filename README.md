@@ -285,13 +285,13 @@ python path/to/matrixfree/run_example.py \
 
 #### 2) Dry run (preview copy + command)
 ```bash
-python run_example.py --example rotate_to_anisotropy --dry-run -- --mesh cube
+python run_example.py --example rotate_to_easyaxis --dry-run -- --mesh cube
 ```
 
 #### 3) Clean up automatically on success
 ```bash
 python run_example.py \
-  --example rotate_to_anisotropy \
+  --example rotate_to_easyaxis \
   --clean-on-success \
   -- --mesh cube --debug-lbfgs
 ```
