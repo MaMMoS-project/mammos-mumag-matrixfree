@@ -58,10 +58,20 @@ python mesh.py --geom box --extent 60,40,20 --h 2.0 --backend meshpy --out-name 
 This repo also supports an "eye" (Bézier-shaped) extruded prism geometry in the single-solid mesher.
 You can generate meshes from the CLI in `src/mesh.py` or programmatically via `run_single_solid_mesher(geom='eye', ...)`.
 
-Quick notes:
-- Geometry choices supported by the mesher: `box`, `ellipsoid`, and `eye`.
+- Quick notes:
+- Geometry choices supported by the mesher: `box`, `ellipsoid`, `eye`, and `elliptic_cylinder`.
+- `elliptic_cylinder`: an extruded ellipse (cross-section semi-axes a=Lx/2, b=Ly/2) with total thickness Lz along the local z-axis; supply `--extent Lx,Ly,Lz` as for other geometries.
 - Backends: `meshpy` (TetGen) for high-quality tetrahedral meshes, or `grid` (pure‑NumPy brick grid) for fast, dependency‑free mesh generation. The mesher prefers `meshpy` if available.
 - Use `--force-grid` to force the grid backend even when `meshpy` is installed (handy for CI or when TetGen isn't desired).
+
+Examples (elliptic_cylinder, run from repository root):
+```
+# grid backend (fast, no extra deps)
+python3 -c "import sys; sys.path.insert(0, '.'); from src.mesh import run_single_solid_mesher; run_single_solid_mesher(geom='elliptic_cylinder', extent='3.5,2.0,0.01', h=0.8, backend='grid', out_name='smoke_elliptic_grid', no_vis=True, verbose=True)"
+
+# prefer meshpy backend (requires meshpy/TetGen)
+python3 -c "import sys; sys.path.insert(0, '.'); from src.mesh import run_single_solid_mesher; run_single_solid_mesher(geom='elliptic_cylinder', extent='3.5,2.0,0.01', h=0.8, backend='meshpy', out_name='smoke_elliptic_meshpy', no_vis=True, verbose=True)"
+```
 
 ### Demagnetization curve (M–H loop) 
 
