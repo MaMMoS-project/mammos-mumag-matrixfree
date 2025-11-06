@@ -400,6 +400,168 @@ def triangulate_polygon(polygon: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return polygon, triangles
 
 
+# ------------------------------- Elliptic cylinder (extruded ellipse) -------------------------------
+
+
+def build_ellipse_polygon(a: float = 1.0, b: float = 0.5, n: int = 128) -> np.ndarray:
+    """Return an Nx2 CCW polygon approximating an axis-aligned ellipse with semi-axes a (x) and b (y)."""
+    if a <= 0 or b <= 0:
+        raise ValueError("Ellipse semi-axes must be positive.")
+    ts = np.linspace(0.0, 2.0 * np.pi, max(8, int(n)), endpoint=False)
+    x = a * np.cos(ts)
+    y = b * np.sin(ts)
+    polygon = np.column_stack((x, y))
+    return polygon
+
+
+def mesh_backend_meshpy_elliptic_cylinder(
+    a: float,
+    b: float,
+    t: float,
+    ex: np.ndarray,
+    ey: np.ndarray,
+    ez: np.ndarray,
+    h: float,
+    minratio: float,
+    verbose: bool,
+):
+    if not HAVE_meshpy:
+        raise RuntimeError("meshpy is not installed. Install with: pip install meshpy")
+    # build polygon approximation and triangulate for top/bottom caps
+    polygon = build_ellipse_polygon(a=a, b=b, n=128)
+    polygon, triangles = triangulate_polygon(polygon)
+
+    top_z = t / 2.0
+    bottom_z = -t / 2.0
+    verts_top = np.hstack([polygon, np.full((polygon.shape[0], 1), top_z)])
+    verts_bottom = np.hstack([polygon, np.full((polygon.shape[0], 1), bottom_z)])
+
+    V_local = np.vstack([verts_top, verts_bottom])
+    V_world = np.ascontiguousarray(
+        V_local[:, 0:1] * ex[None, :]
+        + V_local[:, 1:2] * ey[None, :]
+        + V_local[:, 2:3] * ez[None, :],
+        dtype=np.float64,
+    )
+
+    facets = []
+    N = polygon.shape[0]
+    for tri in triangles:
+        facets.append([int(tri[0]), int(tri[1]), int(tri[2])])
+    for tri in triangles:
+        facets.append([int(N + tri[2]), int(N + tri[1]), int(N + tri[0])])
+    for i in range(N):
+        ni = (i + 1) % N
+        aidx = i
+        bidx = ni
+        cidx = N + ni
+        didx = N + i
+        facets.append([aidx, bidx, cidx, didx])
+
+    mi = MeshInfo()
+    mi.set_points(V_world.tolist())
+    mi.set_facets(facets)
+    mi.regions.resize(1)
+    mi.regions[0] = (0.0, 0.0, 0.0, 1.0, approx_max_volume_from_edge(float(h)))
+
+    opts = Options("pqAa")
+    opts.minratio = float(minratio)
+    opts.regionattrib = True
+    opts.verbose = bool(verbose)
+
+    mesh = tet_build(
+        mi,
+        options=opts,
+        attributes=True,
+        volume_constraints=True,
+        verbose=bool(verbose),
+    )
+    knt = np.asarray(mesh.points, dtype=np.float64)
+    tets = np.asarray(mesh.elements, dtype=np.int32)
+    ijk = np.hstack([tets, np.ones((tets.shape[0], 1), dtype=np.int32)])
+    return knt, ijk
+
+
+def mesh_backend_grid_elliptic_cylinder(
+    a: float,
+    b: float,
+    t: float,
+    ex: np.ndarray,
+    ey: np.ndarray,
+    ez: np.ndarray,
+    h: float,
+    verbose: bool,
+):
+    # bounding box: x in [-a,a], y in [-b,b], z in [-t/2,t/2]
+    Lx = 2.0 * float(a)
+    Ly = 2.0 * float(b)
+    Lz = float(t)
+    nx = max(1, int(np.ceil(Lx / h)))
+    ny = max(1, int(np.ceil(Ly / h)))
+    nz = max(1, int(np.ceil(Lz / h)))
+    xs = np.linspace(-Lx / 2, Lx / 2, nx + 1)
+    ys = np.linspace(-Ly / 2, Ly / 2, ny + 1)
+    zs = np.linspace(-Lz / 2, Lz / 2, nz + 1)
+
+    def nidx(i, j, k) -> int:
+        return i + (nx + 1) * (j + (ny + 1) * k)
+
+    Nnodes = (nx + 1) * (ny + 1) * (nz + 1)
+    knt = np.empty((Nnodes, 3), dtype=np.float64)
+    for k in range(nz + 1):
+        z = zs[k]
+        for j in range(ny + 1):
+            y = ys[j]
+            for i in range(nx + 1):
+                x = xs[i]
+                p = oriented_point(x, y, z, ex, ey, ez)
+                knt[nidx(i, j, k), :] = p
+
+    tets: list[tuple] = []
+    polygon = build_ellipse_polygon(a=a, b=b, n=128)
+
+    def to_local(pw: np.ndarray) -> np.ndarray:
+        return np.array(
+            [np.dot(pw, ex), np.dot(pw, ey), np.dot(pw, ez)], dtype=np.float64
+        )
+
+    for k in range(nz):
+        for j in range(ny):
+            for i in range(nx):
+                A = nidx(i, j, k)
+                B = nidx(i + 1, j, k)
+                C = nidx(i, j + 1, k)
+                D = nidx(i + 1, j + 1, k)
+                E = nidx(i, j, k + 1)
+                F = nidx(i + 1, j, k + 1)
+                G = nidx(i, j + 1, k + 1)
+                H = nidx(i + 1, j + 1, k + 1)
+                local_tets = [
+                    (A, B, D, H),
+                    (A, B, F, H),
+                    (A, C, D, H),
+                    (A, C, G, H),
+                    (A, E, F, H),
+                    (A, E, G, H),
+                ]
+                for tcell in local_tets:
+                    P_world = knt[list(tcell), :]
+                    ctd_world = P_world.mean(axis=0)
+                    ctd = to_local(ctd_world)
+                    inside = _points_in_polygon(ctd[None, :2], polygon)[0]
+                    if inside and abs(ctd[2]) <= (Lz / 2.0 + 1e-12):
+                        tets.append(tcell)
+
+    tets = np.asarray(tets, dtype=np.int32)
+    ijk = np.hstack([tets, np.ones((tets.shape[0], 1), dtype=np.int32)])
+    if verbose:
+        print(
+            f"[info:grid:elliptic_cylinder] nx,ny,nz=({nx},{ny},{nz}); nodes={knt.shape[0]}, kept tets={ijk.shape[0]}",
+            flush=True,
+        )
+    return knt, ijk
+
+
 # Mesh backends for eye geometry
 def mesh_backend_meshpy_eye(
     length: float,
@@ -851,11 +1013,13 @@ def run_single_solid_mesher(
     # Build orthonormal frame from user directions (used for both shapes)
     ex, ey, ez = orthonormal_frame(dx, dy, dz)
 
-    # TODO: include the geometry for a eye shape from the temporary added file generate_element.py from the same folder to be used as option next to box and ellipsoid. copy the code here and adopt it to the current structure.
+    # TODO: include the geometry for a elliptic_cylinder shape as option next to box, eye and ellipsoid. adopt it to the current structure.
 
     # Dispatch geometry + backend
-    if geom not in ("box", "ellipsoid", "eye"):
-        raise ValueError("geom must be 'box' or 'ellipsoid' or 'eye'")
+    if geom not in ("box", "ellipsoid", "eye", "elliptic_cylinder"):
+        raise ValueError(
+            "geom must be 'box' or 'ellipsoid' or 'eye' or 'elliptic_cylinder'"
+        )
     if backend not in ("meshpy", "grid"):
         raise ValueError("backend must be 'meshpy' or 'grid'")
     # Prefer meshpy when it is available, unless the caller set force_grid=True
@@ -965,6 +1129,34 @@ def run_single_solid_mesher(
                 h=float(h),
                 verbose=bool(verbose),
             )
+    elif geom == "elliptic_cylinder":
+        # Elliptic cylinder: cross-section ellipse with semi-axes a=Lx/2, b=Ly/2, extruded along z with thickness Lz
+        a = float(Lx) / 2.0
+        b = float(Ly) / 2.0
+        thickness = float(Lz)
+        if effective_backend == "meshpy":
+            knt, ijk = mesh_backend_meshpy_elliptic_cylinder(
+                a=a,
+                b=b,
+                t=thickness,
+                ex=ex,
+                ey=ey,
+                ez=ez,
+                h=float(h),
+                minratio=float(minratio),
+                verbose=bool(verbose),
+            )
+        else:
+            knt, ijk = mesh_backend_grid_elliptic_cylinder(
+                a=a,
+                b=b,
+                t=thickness,
+                ex=ex,
+                ey=ey,
+                ez=ez,
+                h=float(h),
+                verbose=bool(verbose),
+            )
 
     # Resolve output filenames
     base = (out_name or "single_solid").strip()
@@ -1012,8 +1204,8 @@ def main():
         "--geom",
         type=str,
         default="box",
-        choices=["box", "ellipsoid", "eye"],
-        help="Select geometry: parallelepiped (box) or ellipsoid (symmetry axis is local z).",
+        choices=["box", "ellipsoid", "eye", "elliptic_cylinder"],
+        help="Select geometry: parallelepiped (box), ellipsoid (symmetry axis is local z), eye, or elliptic_cylinder (extruded ellipse).",
     )
     ap.add_argument(
         "--extent",
