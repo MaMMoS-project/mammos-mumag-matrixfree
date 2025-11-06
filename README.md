@@ -1,4 +1,6 @@
-# Matrix‑free Micromagnetics
+# mammos-mumag-matrixfree
+
+## Matrix‑free Micromagnetics
 
 **What it does**
  * Builds air shells around a body mesh, precomputes tetrahedral geometry, and scales volumes to unit body volume.
@@ -35,6 +37,7 @@ CPU only environement:
 NVIDIA GPU:
 `pip install numpy scipy pyamg meshio meshpy jax jaxopt[cuda12]`
 
+
 ### Generate a mesh (body `.npz`)
 Create a body mesh before running the solvers. Two backends are available:
 
@@ -49,6 +52,16 @@ python mesh.py --geom box --extent 60,40,20 --h 2.0 --backend meshpy --out-name 
 ```
 
 > **Tip:** If you don’t have TetGen/meshpy, switch to `--backend grid` to get a quick starter mesh (VTU export still needs `meshio`).
+
+
+### Geometry and mesher options
+This repo also supports an "eye" (Bézier-shaped) extruded prism geometry in the single-solid mesher.
+You can generate meshes from the CLI in `src/mesh.py` or programmatically via `run_single_solid_mesher(geom='eye', ...)`.
+
+Quick notes:
+- Geometry choices supported by the mesher: `box`, `ellipsoid`, and `eye`.
+- Backends: `meshpy` (TetGen) for high-quality tetrahedral meshes, or `grid` (pure‑NumPy brick grid) for fast, dependency‑free mesh generation. The mesher prefers `meshpy` if available.
+- Use `--force-grid` to force the grid backend even when `meshpy` is installed (handy for CI or when TetGen isn't desired).
 
 ### Demagnetization curve (M–H loop) 
 
