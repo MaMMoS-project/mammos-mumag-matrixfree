@@ -15,15 +15,20 @@ from magnetostatics import (
     MU0,  # keep MU0 import
 )
 from geom import TetGeom
-from energies import brown_energy_and_grad_from_m, brown_energy_and_grad_from_scalar_potential, magnetic_volume
+from energies import (
+    brown_energy_and_grad_from_m,
+    brown_energy_and_grad_from_scalar_potential,
+    magnetic_volume,
+)
 from optimize import (
     prepare_core_amg,
-    prepare_core_amg_scalar,             # <-- scalar AMG prep
-    minimize_energy_lbfgs,               # CG precond removed
+    prepare_core_amg_scalar,  # <-- scalar AMG prep
+    minimize_energy_lbfgs,  # CG precond removed
     make_uniform_u_raw,
     precompute_diag_tangent_from_geom,
-    precompute_block_jacobi_3x3_from_geom
+    precompute_block_jacobi_3x3_from_geom,
 )
+
 
 # ------------------------------- Dataclasses ---------------------------------
 @dataclass
@@ -34,26 +39,40 @@ class AmgPack:
     Dinv_t: Tuple[jnp.ndarray, ...]
     L_c: Optional[jnp.ndarray] = None
 
+
 @dataclass
 class InitialState:
-    mx: float; my: float; mz: float
+    mx: float
+    my: float
+    mz: float
+
 
 @dataclass
 class FieldSchedule:
-    hstart: float; hfinal: float; hstep: float
-    hx: float; hy: float; hz: float
-    mstep: float; mfinal: float
+    hstart: float
+    hfinal: float
+    hstep: float
+    hx: float
+    hy: float
+    hz: float
+    mstep: float
+    mfinal: float
+
 
 @dataclass
 class MinimizerOptions:
-    tol_fun: float; tol_hmag_factor: float
+    tol_fun: float
+    tol_hmag_factor: float
+
 
 @dataclass
 class P2Config:
-    path: str; mesh_size: float
+    path: str
+    mesh_size: float
     initial: InitialState
     field: FieldSchedule
     minimizer: MinimizerOptions
+
 
 @dataclass
 class MaterialsPack:
@@ -62,16 +81,24 @@ class MaterialsPack:
     K1_lookup: jnp.ndarray
     k_easy_e: jnp.ndarray
 
+
 @dataclass
 class EnergyReport:
-    S_brown: float; S_brown_scaled: float
-    E_classical: float; E_classical_scaled: float
+    S_brown: float
+    S_brown_scaled: float
+    E_classical: float
+    E_classical_scaled: float
     Nz: float
 
+
 # ---------------------------------- Utils ------------------------------------
-_FLOAT_RX = re.compile(r"""
+_FLOAT_RX = re.compile(
+    r"""
  \[\-\+\]?\(?\d+\(?\.\d*\)?|\.\d+\)?\([eE][\-\+]?\d+\)?
-""", re.VERBOSE)
+""",
+    re.VERBOSE,
+)
+
 
 def _getfloat_relaxed(cfg, section, option, default=None):
     if not (cfg.has_section(section) and cfg.has_option(section, option)):
@@ -86,25 +113,36 @@ def _getfloat_relaxed(cfg, section, option, default=None):
         except Exception:
             return default
 
-def _normalize(v: Tuple[float,float,float], eps=1e-30):
-    x,y,z = v; n = (x*x+y*y+z*z)**0.5
-    return (0.0,0.0,1.0,1.0) if n<eps else (x/n,y/n,z/n,n)
+
+def _normalize(v: Tuple[float, float, float], eps=1e-30):
+    x, y, z = v
+    n = (x * x + y * y + z * z) ** 0.5
+    return (0.0, 0.0, 1.0, 1.0) if n < eps else (x / n, y / n, z / n, n)
+
 
 def _infer_default_krn_path(mesh_arg: str) -> Path:
     p = Path(mesh_arg)
     return p.with_suffix(".krn") if p.suffix else p.parent / (p.name + ".krn")
 
+
 def _basename_from_mesh(mesh_arg: str) -> str:
     return str(Path(mesh_arg).with_suffix(""))
 
+
 # ----------------------------- Steps 1–4 -------------------------------------
 def step1_prepare(*, mesh: str, K=None, KL=None, auto_layers=True, verbose=False):
-    p2p = p2_path_for_mesh(mesh); _, K_p2, KL_p2 = read_mesh_params_from_p2(p2p)
+    p2p = p2_path_for_mesh(mesh)
+    _, K_p2, KL_p2 = read_mesh_params_from_p2(p2p)
     K_eff = float(K if K is not None else (K_p2 if K_p2 is not None else 1.5))
     KL_eff = float(KL if KL is not None else (KL_p2 if KL_p2 is not None else 5.0))
-    return prepare_shells_and_geom(mesh=mesh, K=K_eff, KL=KL_eff, auto_layers=auto_layers, verbose=verbose)
+    return prepare_shells_and_geom(
+        mesh=mesh, K=K_eff, KL=KL_eff, auto_layers=auto_layers, verbose=verbose
+    )
 
-def step2_build_amg(geom: TetGeom, *, amg="sa", ms_mode: str = "A", gauge: float = 300.0) -> AmgPack:
+
+def step2_build_amg(
+    geom: TetGeom, *, amg="sa", ms_mode: str = "A", gauge: float = 300.0
+) -> AmgPack:
     if ms_mode == "A":
         A_t, P_t, R_t, Dinv_t, L_c = prepare_core_amg(geom, amg=amg, gauge=gauge)
     else:
@@ -112,12 +150,16 @@ def step2_build_amg(geom: TetGeom, *, amg="sa", ms_mode: str = "A", gauge: float
         A_t, P_t, R_t, Dinv_t, L_c = prepare_core_amg_scalar(geom, amg=amg)
     return AmgPack(A_t=A_t, P_t=P_t, R_t=R_t, Dinv_t=Dinv_t, L_c=L_c)
 
+
 def step3_read_p2(mesh: str) -> Optional[P2Config]:
-    p2p = p2_path_for_mesh(mesh); p = Path(p2p)
-    if not p.exists(): return None
+    p2p = p2_path_for_mesh(mesh)
+    p = Path(p2p)
+    if not p.exists():
+        return None
     cfg = configparser.ConfigParser()
     try:
-        with p.open("r") as f: cfg.read_file(f)
+        with p.open("r") as f:
+            cfg.read_file(f)
     except Exception:
         return None
 
@@ -132,12 +174,12 @@ def step3_read_p2(mesh: str) -> Optional[P2Config]:
     hx = _getfloat_relaxed(cfg, "field", "hx", 0.0)
     hy = _getfloat_relaxed(cfg, "field", "hy", 0.0)
     hz = _getfloat_relaxed(cfg, "field", "hz", 1.0)
-    hx_n, hy_n, hz_n, _ = _normalize((hx,hy,hz))
+    hx_n, hy_n, hz_n, _ = _normalize((hx, hy, hz))
 
     mu0 = float(MU0)
-    hstart = float(hstart_T)/mu0
-    hfinal = float(hfinal_T)/mu0
-    hstep = float(hstep_T)/mu0
+    hstart = float(hstart_T) / mu0
+    hfinal = float(hfinal_T) / mu0
+    hstep = float(hstep_T) / mu0
     mstep = _getfloat_relaxed(cfg, "field", "mstep", 0.4)
     mfinal = _getfloat_relaxed(cfg, "field", "mfinal", -1.2)
 
@@ -145,15 +187,30 @@ def step3_read_p2(mesh: str) -> Optional[P2Config]:
     tol_hmag_factor = _getfloat_relaxed(cfg, "minimizer", "tol_hmag_factor", 1.0)
 
     init = InitialState(mx=float(mx), my=float(my), mz=float(mz))
-    field = FieldSchedule(hstart=float(hstart), hfinal=float(hfinal), hstep=float(hstep),
-                          hx=float(hx_n), hy=float(hy_n), hz=float(hz_n),
-                          mstep=float(mstep), mfinal=float(mfinal))
-    minim = MinimizerOptions(tol_fun=float(tol_fun), tol_hmag_factor=float(tol_hmag_factor))
-    return P2Config(path=str(p), mesh_size=float(size), initial=init, field=field, minimizer=minim)
+    field = FieldSchedule(
+        hstart=float(hstart),
+        hfinal=float(hfinal),
+        hstep=float(hstep),
+        hx=float(hx_n),
+        hy=float(hy_n),
+        hz=float(hz_n),
+        mstep=float(mstep),
+        mfinal=float(mfinal),
+    )
+    minim = MinimizerOptions(
+        tol_fun=float(tol_fun), tol_hmag_factor=float(tol_hmag_factor)
+    )
+    return P2Config(
+        path=str(p), mesh_size=float(size), initial=init, field=field, minimizer=minim
+    )
 
-def step4_read_materials(*, krn_path: str, geom: TetGeom, mesh_size: float) -> MaterialsPack:
+
+def step4_read_materials(
+    *, krn_path: str, geom: TetGeom, mesh_size: float
+) -> MaterialsPack:
     p = Path(krn_path)
-    if not p.exists(): raise FileNotFoundError(f".krn not found: {krn_path}")
+    if not p.exists():
+        raise FileNotFoundError(f".krn not found: {krn_path}")
     lines = p.read_text().splitlines()
     recs = []
     for ln in lines:
@@ -165,10 +222,12 @@ def step4_read_materials(*, krn_path: str, geom: TetGeom, mesh_size: float) -> M
             continue
         theta, phi, K1, _unused, Js, A = map(float, parts[:6])
         recs.append((theta, phi, K1, Js, A))
-    if not recs: raise ValueError(".krn has no valid data lines")
+    if not recs:
+        raise ValueError(".krn has no valid data lines")
 
     G = int(jnp.max(geom.mat_id).item())
-    if G < 1: raise ValueError("geom.mat_id must contain positive (1-based) IDs")
+    if G < 1:
+        raise ValueError("geom.mat_id must contain positive (1-based) IDs")
     M_needed = G - 1
     if len(recs) < M_needed:
         raise ValueError(f".krn provides {len(recs)} line(s); mesh needs {M_needed}")
@@ -178,40 +237,47 @@ def step4_read_materials(*, krn_path: str, geom: TetGeom, mesh_size: float) -> M
 
     inv_size2 = 1.0 / (mesh_size * mesh_size)
     Ms_list, Aex_list, K1_list, easy_rows = [], [], [], []
-    for (theta, phi, K1, Js, A) in recs:
+    for theta, phi, K1, Js, A in recs:
         Ms_list.append(float(Js) / float(MU0))
         Aex_list.append(float(A) * inv_size2)
         K1_list.append(float(K1))
         st, ct = jnp.sin(theta), jnp.cos(theta)
         sp, cp = jnp.sin(phi), jnp.cos(phi)
-        easy_rows.append(jnp.asarray([st*cp, st*sp, ct], dtype=jnp.float64))
+        easy_rows.append(jnp.asarray([st * cp, st * sp, ct], dtype=jnp.float64))
 
     # air material appended
-    Ms_list.append(0.0); Aex_list.append(0.0); K1_list.append(0.0)
+    Ms_list.append(0.0)
+    Aex_list.append(0.0)
+    K1_list.append(0.0)
 
     Ms_lookup = jnp.asarray(Ms_list, dtype=jnp.float64)
     A_lookup_exchange = jnp.asarray(Aex_list, dtype=jnp.float64)
     K1_lookup = jnp.asarray(K1_list, dtype=jnp.float64)
 
     E = int(geom.conn.shape[0])
-    EasyLUT = jnp.zeros((G+1,3), dtype=jnp.float64)
+    EasyLUT = jnp.zeros((G + 1, 3), dtype=jnp.float64)
     for g in range(1, G):
-        EasyLUT = EasyLUT.at[g].set(easy_rows[g-1])
+        EasyLUT = EasyLUT.at[g].set(easy_rows[g - 1])
     k_easy_e = EasyLUT[geom.mat_id]
 
     return MaterialsPack(Ms_lookup, A_lookup_exchange, K1_lookup, k_easy_e)
 
+
 # ----------------------------- Step 5/6 helpers ------------------------------
 def compute_B_H_from_A(*, geom: TetGeom, A_nodes, m_nodes, Ms_lookup):
-    conn = geom.conn; grad_phi = geom.grad_phi; mat_id = geom.mat_id
-    A_e4 = A_nodes[conn]; G_e4 = grad_phi
+    conn = geom.conn
+    grad_phi = geom.grad_phi
+    mat_id = geom.mat_id
+    A_e4 = A_nodes[conn]
+    G_e4 = grad_phi
     B_e4 = jnp.cross(G_e4, A_e4)
     B_e = jnp.sum(B_e4, axis=1)
     Ms_e = jnp.take(Ms_lookup, (mat_id - 1))
     m_e = jnp.mean(m_nodes[conn], axis=1)
-    M_e = Ms_e[:,None] * m_e
-    H_e = (1.0/float(MU0)) * B_e - M_e
+    M_e = Ms_e[:, None] * m_e
+    H_e = (1.0 / float(MU0)) * B_e - M_e
     return M_e, B_e, H_e
+
 
 def compute_B_H_from_U(*, geom: TetGeom, U_nodes, m_nodes, Ms_lookup):
     """
@@ -222,15 +288,16 @@ def compute_B_H_from_U(*, geom: TetGeom, U_nodes, m_nodes, Ms_lookup):
     conn = geom.conn
     grad_phi = geom.grad_phi
     mat_id = geom.mat_id
-    U_e4 = U_nodes[conn]                      # (E,4)
+    U_e4 = U_nodes[conn]  # (E,4)
     # gradU_e[k] = sum_alpha U_e4[alpha] * grad_phi[alpha,k]
-    gradU_e = jnp.einsum('ea,eak->ek', U_e4, grad_phi)  # (E,3)
+    gradU_e = jnp.einsum("ea,eak->ek", U_e4, grad_phi)  # (E,3)
     H_e = -gradU_e
     Ms_e = jnp.take(Ms_lookup, (mat_id - 1))
     m_e = jnp.mean(m_nodes[conn], axis=1)
     M_e = Ms_e[:, None] * m_e
     B_e = jnp.asarray(MU0, dtype=H_e.dtype) * (H_e + M_e)
     return M_e, B_e, H_e
+
 
 # ----------------------------- Step 5: initial E -----------------------------
 def check_unit_vectors(m: jnp.ndarray, tol: float = 1e-12) -> bool:
@@ -252,14 +319,15 @@ def check_unit_vectors(m: jnp.ndarray, tol: float = 1e-12) -> bool:
     norms = jnp.linalg.norm(m, axis=1)
     return bool(jnp.all(jnp.abs(norms - 1.0) <= tol))
 
+
 def make_vortex_yz(
     knt: jnp.ndarray,
     *,
     center: Optional[Sequence[float]] = None,
     core_radius_frac: float = 0.001,
     core_amp: float = 1.0,
-    chirality: int = +1,   # +1 or -1: rotation sense in the y–z plane
-    polarity: int = +1,    # +1 or -1: +x or -x vortex core
+    chirality: int = +1,  # +1 or -1: rotation sense in the y–z plane
+    polarity: int = +1,  # +1 or -1: +x or -x vortex core
 ) -> jnp.ndarray:
     """
     Create a vortex in the y–z plane (circulation around x) with a small core along x.
@@ -316,7 +384,7 @@ def make_vortex_yz(
     inv_rho = 1.0 / jnp.maximum(rho, eps)
     ephi_x = jnp.zeros_like(rho)
     ephi_y = chirality * (-dz * inv_rho)
-    ephi_z = chirality * ( dy * inv_rho)
+    ephi_z = chirality * (dy * inv_rho)
 
     # At the core (rho ~ 0), make e_phi = 0 explicitly to avoid tiny noise
     mask_core = rho < jnp.asarray(1e-12, dtype=rho.dtype)
@@ -327,7 +395,7 @@ def make_vortex_yz(
     #     m_x_core = polarity * core_amp * exp(-(rho/r0)^2)
     # Handle r0==0 (degenerate geometry) gracefully.
     inv_r0 = jnp.where(r0 > 0, 1.0 / r0, 0.0)
-    mx_core = polarity * core_amp * jnp.exp(- (rho * inv_r0) ** 2)
+    mx_core = polarity * core_amp * jnp.exp(-((rho * inv_r0) ** 2))
 
     # --- Combine and normalize to unit length: v = e_phi + mx_core * ex
     v_x = mx_core
@@ -345,63 +413,106 @@ def make_vortex_yz(
         sys.exit()
     return m
 
+
 # Optional: JIT-compiled wrapper for speed
 # make_vortex_yz_jit = jax.jit(make_vortex_yz, static_argnames=("center", "core_radius_frac", "core_amp", "chirality", "polarity"))
 
 
 def step5_initial_energy_and_MS(
     *,
-    knt, geom, amg: AmgPack, materials: MaterialsPack, p2cfg: P2Config, ini,
+    knt,
+    geom,
+    amg: AmgPack,
+    materials: MaterialsPack,
+    p2cfg: P2Config,
+    ini,
     ms_mode: str = "A",
     gauge: float = 300.0,
-    tol=1e-3, maxiter=500, nu_pre=2, nu_post=2, omega=0.7, coarse_iters=8, coarse_omega=0.7,
-    Nz: float = 1.0/3.0,
+    tol=1e-3,
+    maxiter=500,
+    nu_pre=2,
+    nu_post=2,
+    omega=0.7,
+    coarse_iters=8,
+    coarse_omega=0.7,
+    Nz: float = 1.0 / 3.0,
 ):
     N = int(knt.shape[0])
 
-    if ini:                        # set ini from cli
-        if ini=='uniform':
+    if ini:  # set ini from cli
+        if ini == "uniform":
             mx, my, mz = 0.0, 0.0, 1.0
-            m0 = jnp.tile(jnp.asarray([mx,my,mz], dtype=jnp.float64), (N,1))
-        elif ini=='vortex':
+            m0 = jnp.tile(jnp.asarray([mx, my, mz], dtype=jnp.float64), (N, 1))
+        elif ini == "vortex":
             m0 = make_vortex_yz(knt)
         else:
             print("unknown initial state")
             sys.exit()
     else:
-        mx,my,mz = float(p2cfg.initial.mx), float(p2cfg.initial.my), float(p2cfg.initial.mz)
-        mx,my,mz,_ = _normalize((mx,my,mz))
-        m0 = jnp.tile(jnp.asarray([mx,my,mz], dtype=jnp.float64), (N,1))
+        mx, my, mz = (
+            float(p2cfg.initial.mx),
+            float(p2cfg.initial.my),
+            float(p2cfg.initial.mz),
+        )
+        mx, my, mz, _ = _normalize((mx, my, mz))
+        m0 = jnp.tile(jnp.asarray([mx, my, mz], dtype=jnp.float64), (N, 1))
 
     if ms_mode == "A":
         from magnetostatics import _solve_A_jax_cg_compMG_core_jit
-        x0_flat = jnp.zeros((3*N,), dtype=jnp.float64)
+
+        x0_flat = jnp.zeros((3 * N,), dtype=jnp.float64)
         A0, *_ = _solve_A_jax_cg_compMG_core_jit(
-            amg.A_t, amg.P_t, amg.R_t, amg.Dinv_t, amg.L_c,
-            x0_flat, m0, geom, materials.Ms_lookup,
-            tol, maxiter, gauge=gauge,
-            nu_pre=nu_pre, nu_post=nu_post, omega=omega,
-            coarse_iters=coarse_iters, coarse_omega=coarse_omega
+            amg.A_t,
+            amg.P_t,
+            amg.R_t,
+            amg.Dinv_t,
+            amg.L_c,
+            x0_flat,
+            m0,
+            geom,
+            materials.Ms_lookup,
+            tol,
+            maxiter,
+            gauge=gauge,
+            nu_pre=nu_pre,
+            nu_post=nu_post,
+            omega=omega,
+            coarse_iters=coarse_iters,
+            coarse_omega=coarse_omega,
         )
         S, _, _ = brown_energy_and_grad_from_m(m0, A0, geom, materials.Ms_lookup)
         aux0 = A0
     else:
         from magnetostatics import _solve_U_jax_cg_compMG_core_jit
+
         x0_u = jnp.zeros((N,), dtype=jnp.float64)
         U0, *_ = _solve_U_jax_cg_compMG_core_jit(
-            amg.A_t, amg.P_t, amg.R_t, amg.Dinv_t, amg.L_c,
-            x0_u, m0, geom, materials.Ms_lookup,
-            tol, maxiter,
-            nu_pre=nu_pre, nu_post=nu_post, omega=omega,
-            coarse_iters=coarse_iters, coarse_omega=coarse_omega
+            amg.A_t,
+            amg.P_t,
+            amg.R_t,
+            amg.Dinv_t,
+            amg.L_c,
+            x0_u,
+            m0,
+            geom,
+            materials.Ms_lookup,
+            tol,
+            maxiter,
+            nu_pre=nu_pre,
+            nu_post=nu_post,
+            omega=omega,
+            coarse_iters=coarse_iters,
+            coarse_omega=coarse_omega,
         )
-        S, _, _ = brown_energy_and_grad_from_scalar_potential(m0, U0, geom, materials.Ms_lookup)
+        S, _, _ = brown_energy_and_grad_from_scalar_potential(
+            m0, U0, geom, materials.Ms_lookup
+        )
         aux0 = U0
 
     Ms_e = jnp.take(materials.Ms_lookup, (geom.mat_id - 1))
     E_class = 0.5 * float(MU0) * float(Nz) * float(jnp.sum((Ms_e**2) * geom.volume))
 
-    size_cubed = float(p2cfg.mesh_size ** 3)
+    size_cubed = float(p2cfg.mesh_size**3)
     vol_scale = float(geom.volume_scalefactor)
 
     # NOTE: Energy density printed elsewhere = E_norm * E_ref
@@ -414,71 +525,118 @@ def step5_initial_energy_and_MS(
     )
     return m0, aux0, report
 
+
 # ----------------------------- Step 6: fields to VTU -------------------------
-def write_vtu_MHB(*, basename, knt, geom, mat_id, M_elems, H_elems, B_elems, index=None):
+def write_vtu_MHB(
+    *, basename, knt, geom, mat_id, M_elems, H_elems, B_elems, index=None
+):
     try:
         import meshio
     except Exception as exc:
         raise RuntimeError("meshio required: pip install meshio") from exc
     import numpy as np
+
     mu0 = float(MU0)
     M_T = np.asarray(M_elems * mu0, dtype=np.float64)
     H_T = np.asarray(H_elems * mu0, dtype=np.float64)
     B_T = np.asarray(B_elems, dtype=np.float64)
     points = np.asarray(knt, dtype=np.float64)
     cells = [("tetra", np.asarray(geom.conn, dtype=np.int32))]
-    cell_data = {"mat_id":[np.asarray(mat_id, dtype=np.int32)], "M":[M_T], "B":[B_T], "H":[H_T]}
+    cell_data = {
+        "mat_id": [np.asarray(mat_id, dtype=np.int32)],
+        "M": [M_T],
+        "B": [B_T],
+        "H": [H_T],
+    }
     mesh = meshio.Mesh(points=points, cells=cells, cell_data=cell_data)
-    out_path = f"{basename}.0000.vtu" if index is None else f"{basename}.{index:04d}.vtu"
-    mesh.write(out_path); return out_path
+    out_path = (
+        f"{basename}.0000.vtu" if index is None else f"{basename}.{index:04d}.vtu"
+    )
+    mesh.write(out_path)
+    return out_path
+
 
 # ----------------------------- Step 7: sweep ---------------------------------
 @jax.jit
-def _mh_mxyz_device(*, geom: TetGeom, m_nodes: jnp.ndarray, Ms_lookup: jnp.ndarray, h_dir_unit: jnp.ndarray):
+def _mh_mxyz_device(
+    *,
+    geom: TetGeom,
+    m_nodes: jnp.ndarray,
+    Ms_lookup: jnp.ndarray,
+    h_dir_unit: jnp.ndarray,
+):
     Ms_e = jnp.take(Ms_lookup, (geom.mat_id - 1))
     m_e = jnp.mean(m_nodes[geom.conn], axis=1)
-    M_e = Ms_e[:,None] * m_e
+    M_e = Ms_e[:, None] * m_e
     Vmag = magnetic_volume(geom, Ms_lookup=Ms_lookup, Ms_tol=0.0)
     Vmag_safe = jnp.where(Vmag > 0.0, Vmag, 1.0)
-    integral = jnp.sum(M_e * geom.volume[:,None], axis=0)
+    integral = jnp.sum(M_e * geom.volume[:, None], axis=0)
     Mx, My, Mz = integral / Vmag_safe
     Mx = jnp.where(Vmag > 0.0, Mx, 0.0)
     My = jnp.where(Vmag > 0.0, My, 0.0)
     Mz = jnp.where(Vmag > 0.0, Mz, 0.0)
-    MH_num = jnp.sum(jnp.sum(M_e * h_dir_unit[None,:], axis=1) * geom.volume)
+    MH_num = jnp.sum(jnp.sum(M_e * h_dir_unit[None, :], axis=1) * geom.volume)
     MH = jnp.where(Vmag > 0.0, MH_num / Vmag_safe, 0.0)
     return MH, Mx, My, Mz
 
+
 def _h_schedule(hstart, hfinal, hstep) -> List[float]:
     vals = []
-    if hstep == 0.0: return [float(hstart)]
-    if hstep > 0 and hstart > hfinal: hstep = -hstep
-    if hstep < 0 and hstart < hfinal: hstep = -hstep
+    if hstep == 0.0:
+        return [float(hstart)]
+    if hstep > 0 and hstart > hfinal:
+        hstep = -hstep
+    if hstep < 0 and hstart < hfinal:
+        hstep = -hstep
     x = hstart
     if hstep > 0:
-        while x <= hfinal + 1e-15: vals.append(float(x)); x += hstep
+        while x <= hfinal + 1e-15:
+            vals.append(float(x))
+            x += hstep
     else:
-        while x >= hfinal - 1e-15: vals.append(float(x)); x += hstep
+        while x >= hfinal - 1e-15:
+            vals.append(float(x))
+            x += hstep
     return vals
+
 
 def _m_from_u_raw(u_raw: jnp.ndarray, eps: float = 1e-12):
     r = jnp.linalg.norm(u_raw, axis=1)
     r_safe = jnp.maximum(r, jnp.asarray(eps, u_raw.dtype))
     return u_raw / r_safe[:, None]
 
+
 def step7_demag_sweep(
     *,
-    basename, knt, geom, amg: AmgPack, materials: MaterialsPack, p2cfg: P2Config, ini,
+    basename,
+    knt,
+    geom,
+    amg: AmgPack,
+    materials: MaterialsPack,
+    p2cfg: P2Config,
+    ini,
     energies0: EnergyReport,
     ms_mode: str = "A",
     gauge: float = 300.0,
-    a_tol=1e-3, a_maxiter=500, a_nu_pre=2, a_nu_post=2, a_omega=0.7, a_coarse_iters=8, a_coarse_omega=0.7,
-    lbfgs_history=5, lbfgs_it=800, grad_tol=1e-3, debug_lbfgs=False,
+    a_tol=1e-3,
+    a_maxiter=500,
+    a_nu_pre=2,
+    a_nu_post=2,
+    a_omega=0.7,
+    a_coarse_iters=8,
+    a_coarse_omega=0.7,
+    lbfgs_history=5,
+    lbfgs_it=800,
+    grad_tol=1e-3,
+    debug_lbfgs=False,
     # H0 (no CG)
     h0_mode="diag",
     h0_damping=1e-10,
     # LS
-    ls_init="current", ls_init_stepsize=1.0, ls_max_stepsize=1.0, ls_increase_factor=2.0,
+    ls_init="current",
+    ls_init_stepsize=1.0,
+    ls_max_stepsize=1.0,
+    ls_increase_factor=2.0,
 ):
     N = int(knt.shape[0])
     field = p2cfg.field
@@ -502,26 +660,28 @@ def step7_demag_sweep(
             k_easy_e=materials.k_easy_e,
             E_ref=E_ref,
             mu=float(h0_damping),
-            return_inverse=True
+            return_inverse=True,
         )
     else:
         diag_u = None
 
-
-    if ini:                        # set ini from cli
-        if ini=='uniform':
+    if ini:  # set ini from cli
+        if ini == "uniform":
             mx, my, mz = 0.0, 0.0, 1.0
-            u_raw = make_uniform_u_raw(N, InitialState(mx,my,mz), scale=1.0)
-        elif ini=='vortex':
+            u_raw = make_uniform_u_raw(N, InitialState(mx, my, mz), scale=1.0)
+        elif ini == "vortex":
             u_raw = make_vortex_yz(knt)
         else:
             print("unknown initial state")
             sys.exit()
     else:
         u_raw = make_uniform_u_raw(N, init=p2cfg.initial, scale=1.0)
-    
-    aux_prev = jnp.zeros((knt.shape[0], 3), dtype=jnp.float64) if ms_mode == "A" \
-               else jnp.zeros((knt.shape[0],), dtype=jnp.float64)
+
+    aux_prev = (
+        jnp.zeros((knt.shape[0], 3), dtype=jnp.float64)
+        if ms_mode == "A"
+        else jnp.zeros((knt.shape[0],), dtype=jnp.float64)
+    )
 
     h_vals = _h_schedule(field.hstart, field.hfinal, field.hstep)
     dat_path = f"{basename}.dat"
@@ -542,96 +702,147 @@ def step7_demag_sweep(
         f"{'Jx(T)':>11} {'Jy(T)':>11} {'Jz(T)':>11} "
         f"{'e(J/m3)':>10} {'e_ms(J/m3)':>10} {'e_ex(J/m3)':>10} {'e_an(J/rm3)':>10} {'e_ze(J/m3)':>10}"
     )
-    
+
     for hmag in h_vals:
-        H_ext = jnp.asarray([field.hx*hmag, field.hy*hmag, field.hz*hmag], dtype=jnp.float64)
+        H_ext = jnp.asarray(
+            [field.hx * hmag, field.hy * hmag, field.hz * hmag], dtype=jnp.float64
+        )
 
         E_norm, u_star, aux_star, parts_norm = minimize_energy_lbfgs(
             initial_u_raw=u_raw,
             initial_A=aux_prev,
-            A_t=amg.A_t, P_t=amg.P_t, R_t=amg.R_t, Dinv_t=amg.Dinv_t, L_c=amg.L_c,
-            conn=geom.conn, grad_phi=geom.grad_phi, volume=geom.volume, mat_id=geom.mat_id,
+            A_t=amg.A_t,
+            P_t=amg.P_t,
+            R_t=amg.R_t,
+            Dinv_t=amg.Dinv_t,
+            L_c=amg.L_c,
+            conn=geom.conn,
+            grad_phi=geom.grad_phi,
+            volume=geom.volume,
+            mat_id=geom.mat_id,
             Ms_lookup=materials.Ms_lookup,
             A_lookup_exchange=materials.A_lookup_exchange,
             K1_lookup=materials.K1_lookup,
             k_easy_e=materials.k_easy_e,
-            H_ext=H_ext, E_ref=E_ref,
-            tol=a_tol, maxiter=a_maxiter, nu_pre=a_nu_pre, nu_post=a_nu_post, omega=a_omega,
-            coarse_iters=a_coarse_iters, coarse_omega=a_coarse_omega,
+            H_ext=H_ext,
+            E_ref=E_ref,
+            tol=a_tol,
+            maxiter=a_maxiter,
+            nu_pre=a_nu_pre,
+            nu_post=a_nu_post,
+            omega=a_omega,
+            coarse_iters=a_coarse_iters,
+            coarse_omega=a_coarse_omega,
             eps_norm=1e-12,
             gauge=(gauge if ms_mode == "A" else 0.0),
             ms_mode=ms_mode,
-            history_size=lbfgs_history, outer_max_iter=lbfgs_it, grad_tol=grad_tol,
+            history_size=lbfgs_history,
+            outer_max_iter=lbfgs_it,
+            grad_tol=grad_tol,
             debug_lbfgs=debug_lbfgs,
             H0_mode=h0_mode,
-            ls_init_mode=ls_init, ls_init_stepsize=ls_init_stepsize, ls_max_stepsize=ls_max_stepsize,
-            ls_increase_factor=ls_increase_factor, ls_print=debug_lbfgs,
+            ls_init_mode=ls_init,
+            ls_init_stepsize=ls_init_stepsize,
+            ls_max_stepsize=ls_max_stepsize,
+            ls_increase_factor=ls_increase_factor,
+            ls_print=debug_lbfgs,
             diag_u=diag_u,
         )
 
         m_nodes = _m_from_u_raw(u_star)
         u_raw = m_nodes
 
-        MH, Mx, My, Mz = _mh_mxyz_device(geom=geom, m_nodes=m_nodes, Ms_lookup=materials.Ms_lookup, h_dir_unit=h_dir_unit)
+        MH, Mx, My, Mz = _mh_mxyz_device(
+            geom=geom,
+            m_nodes=m_nodes,
+            Ms_lookup=materials.Ms_lookup,
+            h_dir_unit=h_dir_unit,
+        )
         MH_mu0 = float(MH * jnp.asarray(MU0, dtype=jnp.float64))
 
         # ---- Energy density [J/m^3] = E_norm * E_ref
         E_density = float(E_norm) * float(E_ref)
-           
-        S_norm  = float(parts_norm[0])  # magnetostatic (Brown functional)
+
+        S_norm = float(parts_norm[0])  # magnetostatic (Brown functional)
         Ex_norm = float(parts_norm[1])  # exchange
         An_norm = float(parts_norm[2])  # anisotropy
         Ze_norm = float(parts_norm[3])  # Zeeman
-                
-        S_density  = S_norm  * float(E_ref)
+
+        S_density = S_norm * float(E_ref)
         Ex_density = Ex_norm * float(E_ref)
         An_density = An_norm * float(E_ref)
         Ze_density = Ze_norm * float(E_ref)
 
-        write_now = (last_MH_mu0 is None) or (abs(MH_mu0 - last_MH_mu0) >= field.mstep)
+        write_now = (
+            (last_MH_mu0 is None)
+            or (abs(MH_mu0 - last_MH_mu0) >= field.mstep)
+            or (hmag == h_vals[-1])
+        )
         vtu_written_id = 0
         if write_now:
             vtu_index += 1
             if ms_mode == "A":
-                M_e, B_e, H_e = compute_B_H_from_A(geom=geom, A_nodes=aux_star, m_nodes=m_nodes, Ms_lookup=materials.Ms_lookup)
+                M_e, B_e, H_e = compute_B_H_from_A(
+                    geom=geom,
+                    A_nodes=aux_star,
+                    m_nodes=m_nodes,
+                    Ms_lookup=materials.Ms_lookup,
+                )
             else:
-                M_e, B_e, H_e = compute_B_H_from_U(geom=geom, U_nodes=aux_star, m_nodes=m_nodes, Ms_lookup=materials.Ms_lookup)
-            vtu_path = write_vtu_MHB(basename=basename, knt=knt, geom=geom, mat_id=geom.mat_id,
-                                     M_elems=M_e, H_elems=H_e, B_elems=B_e, index=vtu_index)
+                M_e, B_e, H_e = compute_B_H_from_U(
+                    geom=geom,
+                    U_nodes=aux_star,
+                    m_nodes=m_nodes,
+                    Ms_lookup=materials.Ms_lookup,
+                )
+            vtu_path = write_vtu_MHB(
+                basename=basename,
+                knt=knt,
+                geom=geom,
+                mat_id=geom.mat_id,
+                M_elems=M_e,
+                H_elems=H_e,
+                B_elems=B_e,
+                index=vtu_index,
+            )
             vtu_written_id = vtu_index
             last_MH_mu0 = MH_mu0
 
         # ---- Console output
 
-
         print(
-            f"  {float(hmag*MU0):13.6e} {float(MH*MU0):13.6e} "
-            f"{float(Mx*MU0):11.4e} {float(My*MU0):11.4e} {float(Mz*MU0):11.4e} "
+            f"  {float(hmag * MU0):13.6e} {float(MH * MU0):13.6e} "
+            f"{float(Mx * MU0):11.4e} {float(My * MU0):11.4e} {float(Mz * MU0):11.4e} "
             f"{E_density:10.3e} {S_density:10.3e} {Ex_density:10.3e} {An_density:10.3e} {Ze_density:10.3e}"
         )
-
 
         # ---- .dat output
         with open(dat_path, "a", encoding="utf-8") as f:
             f.write(
                 f"{vtu_written_id:03d} "
-                f"{float(hmag*MU0):13.6e} {float(MH*MU0):12.5e} "
-                f"{float(Mx*MU0):10.3e} {float(My*MU0):10.3e} {float(Mz*MU0):10.3e} "
+                f"{float(hmag * MU0):13.6e} {float(MH * MU0):12.5e} "
+                f"{float(Mx * MU0):10.3e} {float(My * MU0):10.3e} {float(Mz * MU0):10.3e} "
                 f"{E_density:10.3e} {S_density:10.3e} {Ex_density:10.3e} {An_density:10.3e} {Ze_density:10.3e}\n"
-)
-
+            )
 
         aux_prev = aux_star
 
+
 # ---------------------------------- CLI --------------------------------------
 def main():
-    ap = argparse.ArgumentParser(description="Micromagnetics (Steps 1–7) with two-loop L-BFGS.")
+    ap = argparse.ArgumentParser(
+        description="Micromagnetics (Steps 1–7) with two-loop L-BFGS."
+    )
     ap.add_argument("--mesh", required=True)
-    ap.add_argument("--size", type=float, default=None, help='overwrite mesh units in p2 file')
-    ap.add_argument("--ini", choices=["uniform","vortex"], default=None, help="Initial state")
+    ap.add_argument(
+        "--size", type=float, default=None, help="overwrite mesh units in p2 file"
+    )
+    ap.add_argument(
+        "--ini", choices=["uniform", "vortex"], default=None, help="Initial state"
+    )
     ap.add_argument("--K", type=float, default=None)
     ap.add_argument("--KL", type=float, default=None)
-    ap.add_argument("--amg", choices=["sa","rs"], default="sa")
+    ap.add_argument("--amg", choices=["sa", "rs"], default="sa")
 
     # --- Gauge selection: manual or auto (A only) ---
     ap.add_argument(
@@ -647,9 +858,12 @@ def main():
 
     # --- Magnetostatics formulation switch ---
     ap.add_argument(
-        "--ms", "--magnetostatics", dest="ms_mode",
-        choices=["A", "U", "vector", "scalar"], default="U",
-        help="Magnetostatics formulation: 'A' (vector potential) or 'U' (scalar potential)."
+        "--ms",
+        "--magnetostatics",
+        dest="ms_mode",
+        choices=["A", "U", "vector", "scalar"],
+        default="U",
+        help="Magnetostatics formulation: 'A' (vector potential) or 'U' (scalar potential).",
     )
 
     ap.add_argument("--verbose", action="store_true")
@@ -658,7 +872,7 @@ def main():
     ap.add_argument("--no-auto-krn", action="store_true")
     ap.add_argument("--print-materials", action="store_true")
     ap.add_argument("--no-energy", action="store_true")
-    ap.add_argument("--nz", type=float, default=1.0/3.0)
+    ap.add_argument("--nz", type=float, default=1.0 / 3.0)
     ap.add_argument("--print-energy", action="store_true")
     ap.add_argument("--a-it", type=int, default=500)
     ap.add_argument("--a-nu-pre", type=int, default=2)
@@ -673,37 +887,74 @@ def main():
     ap.add_argument("--tol-fun", type=float, default=None)
     ap.add_argument("--tol-hmag-factor", type=float, default=None)
     ap.add_argument("--debug-lbfgs", action="store_true")
-    ap.add_argument("--h0", choices=["gamma","bb","bb1","bb2","diag","block_jacobi","identity"], default="block_jacobi",
-                    help="Two-loop seed H0.")
-    ap.add_argument("--h0-damping", type=float, default=0.0,
-                    help="Small SPD damping used by 'diag' or 'block_jacobi' H0.")
-    ap.add_argument("--ls-init", choices=["current","max","value","increase"], default="increase",
-                    help="Line-search initial step strategy.")
-    ap.add_argument("--ls-init-stepsize", type=float, default=1.0, help="Initial step size.")
-    ap.add_argument("--ls-max-stepsize", type=float, default=1.0, help="Maximum step size.")
-    ap.add_argument("--ls-increase", type=float, default=1.5, help="Expansion factor when --ls-init=increase.")
+    ap.add_argument(
+        "--h0",
+        choices=["gamma", "bb", "bb1", "bb2", "diag", "block_jacobi", "identity"],
+        default="block_jacobi",
+        help="Two-loop seed H0.",
+    )
+    ap.add_argument(
+        "--h0-damping",
+        type=float,
+        default=0.0,
+        help="Small SPD damping used by 'diag' or 'block_jacobi' H0.",
+    )
+    ap.add_argument(
+        "--ls-init",
+        choices=["current", "max", "value", "increase"],
+        default="increase",
+        help="Line-search initial step strategy.",
+    )
+    ap.add_argument(
+        "--ls-init-stepsize", type=float, default=1.0, help="Initial step size."
+    )
+    ap.add_argument(
+        "--ls-max-stepsize", type=float, default=1.0, help="Maximum step size."
+    )
+    ap.add_argument(
+        "--ls-increase",
+        type=float,
+        default=1.5,
+        help="Expansion factor when --ls-init=increase.",
+    )
 
     args = ap.parse_args()
 
     # Step 1
     knt, geom, meta = step1_prepare(
-        mesh=args.mesh, K=(args.K if args.K is not None else 2.0),
+        mesh=args.mesh,
+        K=(args.K if args.K is not None else 2.0),
         KL=(args.KL if args.KL is not None else 10.0),
-        auto_layers=True, verbose=args.verbose
+        auto_layers=True,
+        verbose=args.verbose,
     )
-    N = int(knt.shape[0]); E = int(geom.conn.shape[0])
+    N = int(knt.shape[0])
+    E = int(geom.conn.shape[0])
     print("\n[Step 1] Mesh + Air Shells + Geometry")
     print(f" nodes: {N:,d}, elements: {E:,d}")
-    print(f" shells: K={meta.get('K')}, KL={meta.get('KL')}, auto_layers={meta.get('auto_layers')}")
-    print(f" mesh size: {meta.get('size'):.6g} -> scale size^3 = {meta.get('scale_size_cubed'):.6g}")
-    print(f" volume_scalefactor = {meta.get('volume_scalefactor'):.6e} (1 / body_volume_unscaled={meta.get('body_volume_unscaled'):.6e})")
+    print(
+        f" shells: K={meta.get('K')}, KL={meta.get('KL')}, auto_layers={meta.get('auto_layers')}"
+    )
+    print(
+        f" mesh size: {meta.get('size'):.6g} -> scale size^3 = {meta.get('scale_size_cubed'):.6g}"
+    )
+    print(
+        f" volume_scalefactor = {meta.get('volume_scalefactor'):.6e} (1 / body_volume_unscaled={meta.get('body_volume_unscaled'):.6e})"
+    )
 
     # Step 2: build AMG according to ms_mode
     ms_mode = "A" if args.ms_mode in ("A", "vector") else "U"
-    amg_pack = step2_build_amg(geom, amg=args.amg, ms_mode=ms_mode, gauge=(float(args.gauge) if ms_mode == "A" else 0.0))
+    amg_pack = step2_build_amg(
+        geom,
+        amg=args.amg,
+        ms_mode=ms_mode,
+        gauge=(float(args.gauge) if ms_mode == "A" else 0.0),
+    )
     L_levels = len(amg_pack.A_t)
     print("\n[Step 2] AMG hierarchy")
-    print(f" levels: {L_levels}, finest n={int(amg_pack.A_t[0].shape[0]):,d}, type={args.amg!r}")
+    print(
+        f" levels: {L_levels}, finest n={int(amg_pack.A_t[0].shape[0]):,d}, type={args.amg!r}"
+    )
     if ms_mode == "A":
         print(f" gauge = {args.gauge:.6g}")
     if amg_pack.L_c is not None:
@@ -726,21 +977,29 @@ def main():
                 print(f" initial state: {args.ini}")
             else:
                 ini = p2cfg.initial
-                print(f" initial state: mx={ini.mx:.6g}, my={ini.my:.6g}, mz={ini.mz:.6g}")
+                print(
+                    f" initial state: mx={ini.mx:.6g}, my={ini.my:.6g}, mz={ini.mz:.6g}"
+                )
             fld = p2cfg.field
-            print(f" field sweep: hstart={fld.hstart:.6g}, hfinal={fld.hfinal:.6g}, hstep={fld.hstep:.6g} [A/m]")
-            print(f" field dir (unit): hx={fld.hx:.8f}, hy={fld.hy:.8f}, hz={fld.hz:.8f}")
-            print(f" write m(h) each Δ(±0M) = {fld.mstep:.6g} T; stop if m(h) < {fld.mfinal:.6g}")
+            print(
+                f" field sweep: hstart={fld.hstart:.6g}, hfinal={fld.hfinal:.6g}, hstep={fld.hstep:.6g} [A/m]"
+            )
+            print(
+                f" field dir (unit): hx={fld.hx:.8f}, hy={fld.hy:.8f}, hz={fld.hz:.8f}"
+            )
+            print(
+                f" write m(h) each Δ(±0M) = {fld.mstep:.6g} T; stop if m(h) < {fld.mfinal:.6g}"
+            )
     if args.tol_fun:
-      tol_fun = args.tol_fun
+        tol_fun = args.tol_fun
     else:
-      tol_fun = p2cfg.minimizer.tol_fun if p2cfg else 1e-8
+        tol_fun = p2cfg.minimizer.tol_fun if p2cfg else 1e-8
     if args.tol_hmag_factor:
-      tol_hmag_factor = args.tol_hmag_factor
+        tol_hmag_factor = args.tol_hmag_factor
     else:
-      tol_hmag_factor = p2cfg.minimizer.tol_hmag_factor if p2cfg else 1
+        tol_hmag_factor = p2cfg.minimizer.tol_hmag_factor if p2cfg else 1
     print(f" minimizer: tol_fun={tol_fun:.3e}, tol_hmag_factor={tol_hmag_factor:.6g}")
-    a_tol = tol_hmag_factor * (tol_fun ** (1/3)) 
+    a_tol = tol_hmag_factor * (tol_fun ** (1 / 3))
 
     # Step 4
     krn_path: Optional[Path] = None
@@ -748,77 +1007,140 @@ def main():
         krn_path = Path(args.krn)
     elif not args.no_auto_krn:
         candidate = _infer_default_krn_path(args.mesh)
-        if candidate.exists(): krn_path = candidate
-        else: print(f"\n[info] --krn not provided and default not found: {candidate}")
+        if candidate.exists():
+            krn_path = candidate
+        else:
+            print(f"\n[info] --krn not provided and default not found: {candidate}")
 
     materials = None
     if krn_path is not None:
-        materials = step4_read_materials(krn_path=str(krn_path), geom=geom, mesh_size=mesh_size)
+        materials = step4_read_materials(
+            krn_path=str(krn_path), geom=geom, mesh_size=mesh_size
+        )
     if args.print_materials and materials is not None:
         G = int(jnp.max(geom.mat_id).item())
         print("\n[Step 4] Materials")
-        print(f" #groups={G} (1..{G-1}=materials, {G}=air)")
+        print(f" #groups={G} (1..{G - 1}=materials, {G}=air)")
         print(f" Ms_lookup [A/m]: {materials.Ms_lookup.tolist()}")
-        print(f" A_lookup_exchange [J/m]: {materials.A_lookup_exchange.tolist()} (A/size^2)")
+        print(
+            f" A_lookup_exchange [J/m]: {materials.A_lookup_exchange.tolist()} (A/size^2)"
+        )
         print(f" K1_lookup [J/m^3]: {materials.K1_lookup.tolist()}")
 
     # Step 5
-    aux0 = None; m0 = None; energies0 = None
+    aux0 = None
+    m0 = None
+    energies0 = None
     if not args.no_energy and (p2cfg is not None) and (materials is not None):
         m0, aux0, energies0 = step5_initial_energy_and_MS(
-            knt=knt, geom=geom, amg=amg_pack, materials=materials, p2cfg=p2cfg, ini=args.ini,
+            knt=knt,
+            geom=geom,
+            amg=amg_pack,
+            materials=materials,
+            p2cfg=p2cfg,
+            ini=args.ini,
             ms_mode=ms_mode,
             gauge=(float(args.gauge) if ms_mode == "A" else 0.0),
-            tol=a_tol, maxiter=args.a_it, nu_pre=args.a_nu_pre, nu_post=args.a_nu_post,
-            omega=args.a_omega, coarse_iters=args.a_coarse_it, coarse_omega=args.a_coarse_omega,
-            Nz=float(args.nz)
+            tol=a_tol,
+            maxiter=args.a_it,
+            nu_pre=args.a_nu_pre,
+            nu_post=args.a_nu_post,
+            omega=args.a_omega,
+            coarse_iters=args.a_coarse_it,
+            coarse_omega=args.a_coarse_omega,
+            Nz=float(args.nz),
         )
 
     if args.print_energy and energies0 is not None:
         print("\n[Step 5] Initial energies")
         print(f" Brown (magnetostatic energy density) {energies0.S_brown:.6e} J/m3")
         print(f" Brown (magnetostatic energy) {energies0.S_brown_scaled:.6e} J")
-        print(f" Magnetostatic energy density {energies0.E_classical:.6e} J/m3 (Nz={energies0.Nz:.6g})")
+        print(
+            f" Magnetostatic energy density {energies0.E_classical:.6e} J/m3 (Nz={energies0.Nz:.6g})"
+        )
         print(f" Magnetostatic energy {energies0.E_classical_scaled:.6e} J")
-        print(f" Relative error {(energies0.S_brown-energies0.E_classical)/energies0.E_classical:.6e}")
+        print(
+            f" Relative error {(energies0.S_brown - energies0.E_classical) / energies0.E_classical:.6e}"
+        )
 
     # Step 6
-    if not args.no_vtu and (m0 is not None) and (aux0 is not None) and (materials is not None):
+    if (
+        not args.no_vtu
+        and (m0 is not None)
+        and (aux0 is not None)
+        and (materials is not None)
+    ):
         if ms_mode == "A":
-            M_e, B_e, H_e = compute_B_H_from_A(geom=geom, A_nodes=aux0, m_nodes=m0, Ms_lookup=materials.Ms_lookup)
+            M_e, B_e, H_e = compute_B_H_from_A(
+                geom=geom, A_nodes=aux0, m_nodes=m0, Ms_lookup=materials.Ms_lookup
+            )
         else:
-            M_e, B_e, H_e = compute_B_H_from_U(geom=geom, U_nodes=aux0, m_nodes=m0, Ms_lookup=materials.Ms_lookup)
+            M_e, B_e, H_e = compute_B_H_from_U(
+                geom=geom, U_nodes=aux0, m_nodes=m0, Ms_lookup=materials.Ms_lookup
+            )
         base = _basename_from_mesh(args.mesh)
-        vtu_path = write_vtu_MHB(basename=base, knt=knt, geom=geom, mat_id=geom.mat_id,
-                                 M_elems=M_e, H_elems=H_e, B_elems=B_e, index=None)
+        vtu_path = write_vtu_MHB(
+            basename=base,
+            knt=knt,
+            geom=geom,
+            mat_id=geom.mat_id,
+            M_elems=M_e,
+            H_elems=H_e,
+            B_elems=B_e,
+            index=None,
+        )
         print(f"\n[Step 6] VTU written -> {vtu_path}")
     elif args.no_vtu:
         print("\n[info] VTU writing disabled by --no-vtu")
 
     # Step 7
-    if (not args.no_demag) and (p2cfg is not None) and (materials is not None) and (energies0 is not None):
-        print("\n[Step 7] Demagnetization sweep: two-loop L-BFGS at each field step ...")
+    if (
+        (not args.no_demag)
+        and (p2cfg is not None)
+        and (materials is not None)
+        and (energies0 is not None)
+    ):
+        print(
+            "\n[Step 7] Demagnetization sweep: two-loop L-BFGS at each field step ..."
+        )
         base = _basename_from_mesh(args.mesh)
         step7_demag_sweep(
-            basename=base, knt=knt, geom=geom, amg=amg_pack, materials=materials,
-            p2cfg=p2cfg, ini=args.ini, energies0=energies0,
+            basename=base,
+            knt=knt,
+            geom=geom,
+            amg=amg_pack,
+            materials=materials,
+            p2cfg=p2cfg,
+            ini=args.ini,
+            energies0=energies0,
             ms_mode=ms_mode,
             gauge=(float(args.gauge) if ms_mode == "A" else 0.0),
-            a_tol=a_tol, a_maxiter=args.a_it, a_nu_pre=args.a_nu_pre, a_nu_post=args.a_nu_post,
-            a_omega=args.a_omega, a_coarse_iters=args.a_coarse_it, a_coarse_omega=args.a_coarse_omega,
-            lbfgs_history=args.lbfgs_history, lbfgs_it=args.lbfgs_it, grad_tol=tol_fun,
+            a_tol=a_tol,
+            a_maxiter=args.a_it,
+            a_nu_pre=args.a_nu_pre,
+            a_nu_post=args.a_nu_post,
+            a_omega=args.a_omega,
+            a_coarse_iters=args.a_coarse_it,
+            a_coarse_omega=args.a_coarse_omega,
+            lbfgs_history=args.lbfgs_history,
+            lbfgs_it=args.lbfgs_it,
+            grad_tol=tol_fun,
             debug_lbfgs=args.debug_lbfgs,
-            h0_mode=args.h0, h0_damping=args.h0_damping,
+            h0_mode=args.h0,
+            h0_damping=args.h0_damping,
             ls_init=args.ls_init,
-            ls_init_stepsize=args.ls_init_stepsize, ls_max_stepsize=args.ls_max_stepsize,
+            ls_init_stepsize=args.ls_init_stepsize,
+            ls_max_stepsize=args.ls_max_stepsize,
             ls_increase_factor=args.ls_increase,
         )
         print(f"[Step 7] Sweep finished. Appended results to {base}.dat")
     elif args.no_demag:
         print("\n[info] Demagnetization sweep disabled by --no-demag")
 
-def main_cli(): # keep entrypoint name explicit
+
+def main_cli():  # keep entrypoint name explicit
     main()
+
 
 if __name__ == "__main__":
     main()
