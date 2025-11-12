@@ -35,10 +35,10 @@ These values are use in the material parameters file `box.krn`.
 First, create the mesh for the sphere (already done in this example):
 
 ```bash
-python ../../src/mesh.py --geom box --extent 150.3976965,30.0795393,3.00795393 --h 1.503976965 --backend grid --out-name box
+python ../../src/mesh.py --geom box --extent 751.9884824,150.3976965,15.03976965 --h 5.01325655 --backend grid --out-name box
 ```
 
-This creates a box with an extension of (30 \(l_{ex}\), 6 \(l_{ex}\), 0.6 \(l_{ex}\)) and meshes it with a mesh size of 0.3 \(l_{ex}\). The resulting files are
+This creates a box with an extension of (150 \(l_{ex}\), 30 \(l_{ex}\), 3 \(l_{ex}\)) and meshes it with a mesh size of \(l_{ex}\). The resulting files are
 
 - `box.npz` (mesh)
 - `box.vtu` (for visualization)
@@ -51,18 +51,14 @@ The material and configuration files are:
 **Run a single demagnetization curve**
 
 ````
-python run_example.py --example standard_problem_2 -- --mesh box --KL 30
+python run_example.py --example standard_problem_2 -- --mesh box 
 ````
-
-The flag `--KL 30`  ensures that the air box for magnetostatic field computation is large enough also in the z-direction, along the thickness of the particle. This runs the demagnetization curve a box with the extension  (30 \(l_{ex}\), 6 \(l_{ex}\), 0.6 \(l_{ex}\)).
 
 **Run the simulation a sequence of loops:**
 
 ```bash
-python run_example.py --example standard_problem_2 --script examples/standard_problem_2/sp2_sweep.py -- --loop-arg=--KL --loop-arg=30
+python run_example.py --example standard_problem_2 --script examples/standard_problem_2/sp2_sweep.py
 ```
-
-With `--loop-arg=--KL --loop-arg=30` we pass the flag for larger box size to `loop.py`. 
 
 ---
 

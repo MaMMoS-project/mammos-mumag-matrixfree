@@ -17,5 +17,5 @@ mstep = 10.
 mfinal = -1.2
 
 [minimizer] 
-tol_fun = 1e-10
+tol_fun = 1e-8
 tol_hmag_factor = 1

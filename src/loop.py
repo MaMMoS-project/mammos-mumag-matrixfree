@@ -23,7 +23,8 @@ from energies import (
 from optimize import (
     prepare_core_amg,
     prepare_core_amg_scalar,  # <-- scalar AMG prep
-    minimize_energy_lbfgs,  # CG precond removed
+    minimize_energy_lbfgs, 
+    minimize_energy_bb,
     make_uniform_u_raw,
     precompute_diag_tangent_from_geom,
     precompute_block_jacobi_3x3_from_geom,
@@ -45,6 +46,7 @@ class InitialState:
     mx: float
     my: float
     mz: float
+    ini: int
 
 
 @dataclass
@@ -113,6 +115,46 @@ def _getfloat_relaxed(cfg, section, option, default=None):
         except Exception:
             return default
 
+import re
+
+_INT_RX = re.compile(r"""
+    [\-\+]?          # optional sign
+    \d+              # one or more digits
+""", re.VERBOSE)
+
+def _getint_relaxed(cfg, section, option, default=None):
+    """
+    Read an integer from a ConfigParser with relaxed parsing.
+
+    Behavior:
+    - If 'section' or 'option' is missing -> return default.
+    - Try cfg.getint(section, option).
+    - If that fails, scan the raw string and extract the first signed
+      decimal integer substring; return int(value) if found.
+    - On failure, return default.
+
+    Parameters
+    ----------
+    cfg : configparser.ConfigParser
+    section : str
+    option : str
+    default : Optional[int]
+
+    Returns
+    -------
+    int or default
+    """
+    if not (cfg.has_section(section) and cfg.has_option(section, option)):
+        return default
+    try:
+        return cfg.getint(section, option)
+    except Exception:
+        try:
+            raw = cfg.get(section, option, fallback="")
+            m = _INT_RX.search(raw)
+            return int(m.group(0)) if m else default
+        except Exception:
+            return default
 
 def _normalize(v: Tuple[float, float, float], eps=1e-30):
     x, y, z = v
@@ -167,6 +209,7 @@ def step3_read_p2(mesh: str) -> Optional[P2Config]:
     mx = _getfloat_relaxed(cfg, "initial state", "mx", 0.0)
     my = _getfloat_relaxed(cfg, "initial state", "my", 0.0)
     mz = _getfloat_relaxed(cfg, "initial state", "mz", 1.0)
+    ini = _getint_relaxed(cfg, "initial state", "ini", 0)
 
     hstart_T = _getfloat_relaxed(cfg, "field", "hstart", 0.0)
     hfinal_T = _getfloat_relaxed(cfg, "field", "hfinal", 0.0)
@@ -179,6 +222,7 @@ def step3_read_p2(mesh: str) -> Optional[P2Config]:
     mu0 = float(MU0)
     hstart = float(hstart_T) / mu0
     hfinal = float(hfinal_T) / mu0
+
     hstep = float(hstep_T) / mu0
     mstep = _getfloat_relaxed(cfg, "field", "mstep", 0.4)
     mfinal = _getfloat_relaxed(cfg, "field", "mfinal", -1.2)
@@ -186,7 +230,7 @@ def step3_read_p2(mesh: str) -> Optional[P2Config]:
     tol_fun = _getfloat_relaxed(cfg, "minimizer", "tol_fun", 1e-8)
     tol_hmag_factor = _getfloat_relaxed(cfg, "minimizer", "tol_hmag_factor", 1.0)
 
-    init = InitialState(mx=float(mx), my=float(my), mz=float(mz))
+    init = InitialState(mx=float(mx), my=float(my), mz=float(mz), ini=int(ini))
     field = FieldSchedule(
         hstart=float(hstart),
         hfinal=float(hfinal),
@@ -555,6 +599,114 @@ def write_vtu_MHB(
     mesh.write(out_path)
     return out_path
 
+def save_state_with_index(*, basename: str, index: int,
+                          u_raw, aux_star, ms_mode: str) -> str:
+    """
+    Save current state (u_raw and aux_star) to an .npz named with the VTU index.
+    File name: {basename}.{index:04d}.state.npz
+
+    Parameters
+    ----------
+    basename : str
+        Base path used for VTU files.
+    index : int
+        VTU index (zero-padded to 4 digits).
+    u_raw : array_like (N,3)
+        Current u_raw (your code assigns this to the normalized m-nodes).
+    aux_star : array_like
+        Current auxiliary magnetostatics variable:
+        - ms_mode == "A": A_nodes with shape (N,3)
+        - ms_mode == "U": U_nodes with shape (N,)
+    ms_mode : {"A","U"}
+        Magnetostatics formulation.
+
+    Returns
+    -------
+    out_path : str
+        Path of the written .npz.
+    """
+    import numpy as np
+
+    mode_flag = 0 if ms_mode == "A" else 1
+    out_path = f"{basename}.{index:04d}.state.npz"
+    np.savez(
+        out_path,
+        u_raw=np.asarray(u_raw),
+        aux_star=np.asarray(aux_star),
+        ms_mode=np.array(mode_flag, dtype=np.int8),  # 0="A", 1="U"
+        version=np.array(1, dtype=np.int32),
+    )
+    return out_path
+
+
+def load_state_file(state_path: str, *, expected_N: int | None = None,
+                    ms_mode: str | None = None):
+    """
+    Load a previously saved state (.npz) and return (u_raw, aux_star).
+
+    Parameters
+    ----------
+    state_path : str
+        Path to a file created by save_state_with_index().
+    expected_N : int or None
+        If provided, verify node count matches (N).
+    ms_mode : {"A","U"} or None
+        If provided, verify the saved file matches this formulation.
+
+    Returns
+    -------
+    (u_raw, aux_star)
+        JAX arrays ready to be used as initial state.
+    """
+    import numpy as np
+    data = np.load(state_path, allow_pickle=False)
+
+    # Extract mandatory arrays
+    u_raw_np = data["u_raw"]
+    aux_star_np = data["aux_star"]
+
+    # Optional / legacy fields
+    saved_mode_flag = int(data["ms_mode"]) if "ms_mode" in data.files else 0
+    saved_mode = "A" if saved_mode_flag == 0 else "U"
+
+    # Sanity checks
+    if expected_N is not None and u_raw_np.shape[0] != int(expected_N):
+        raise ValueError(
+            f"State file node count mismatch: file N={u_raw_np.shape[0]} "
+            f"!= expected N={expected_N}"
+        )
+    if ms_mode is not None and ms_mode != saved_mode:
+        raise ValueError(
+            f"State file ms_mode={saved_mode!r} != requested {ms_mode!r}"
+        )
+
+    # Return as JAX arrays
+    return jnp.asarray(u_raw_np), jnp.asarray(aux_star_np)
+
+
+def _parse_int_or_none(s: str | None) -> int | None:
+    """
+    Return int(s) if s is a valid integer string (e.g., "7", "+7", "-3", "0032"),
+    otherwise None. Passing None returns None.
+    """
+    if s is None:
+        return None
+    s = s.strip()
+    if not s:
+        return None
+    try:
+        return int(s, 10)
+    except ValueError:
+        return None
+
+def make_resume_state_path(base,ini,initial):
+   idx = _parse_int_or_none(ini)
+   if idx:
+      return f"{base}.{idx:04d}.state.npz"
+   if initial.ini > 0:
+      return f"{base}.{initial.ini:04d}.state.npz"
+   return None
+
 
 # ----------------------------- Step 7: sweep ---------------------------------
 @jax.jit
@@ -637,11 +789,21 @@ def step7_demag_sweep(
     ls_init_stepsize=1.0,
     ls_max_stepsize=1.0,
     ls_increase_factor=2.0,
+    ls_kind='default',
+    ls_c1=1e-4,
+    ls_c2=0.9,
+    ls_decrease=0.5,
+    damping_delta=0.2,
+    solver='lbfgs',
+    bb_variant='bb2',
+    bb2_precond=True,
 ):
     N = int(knt.shape[0])
     field = p2cfg.field
     h_dir_unit = jnp.asarray([field.hx, field.hy, field.hz], dtype=jnp.float64)
     E_ref = jnp.asarray(energies0.E_classical, dtype=jnp.float64)
+
+    bb_alpha_prev = ls_init_stepsize
 
     # Diagonal / block-Jacobi seeds use CLI damping
     if h0_mode == "diag":
@@ -665,23 +827,34 @@ def step7_demag_sweep(
     else:
         diag_u = None
 
-    if ini:  # set ini from cli
-        if ini == "uniform":
-            mx, my, mz = 0.0, 0.0, 1.0
-            u_raw = make_uniform_u_raw(N, InitialState(mx, my, mz), scale=1.0)
-        elif ini == "vortex":
-            u_raw = make_vortex_yz(knt)
-        else:
-            print("unknown initial state")
-            sys.exit()
-    else:
-        u_raw = make_uniform_u_raw(N, init=p2cfg.initial, scale=1.0)
+    resume_state_path = make_resume_state_path(basename,ini,p2cfg.initial)
 
-    aux_prev = (
-        jnp.zeros((knt.shape[0], 3), dtype=jnp.float64)
-        if ms_mode == "A"
-        else jnp.zeros((knt.shape[0],), dtype=jnp.float64)
-    )
+    if resume_state_path:
+        u_raw_loaded, aux_loaded = load_state_file(
+         resume_state_path, expected_N=N, ms_mode=ms_mode
+        )
+        u_raw = u_raw_loaded
+        aux_prev = aux_loaded
+
+    else:
+
+        if ini:  # set ini from cli
+            if ini == "uniform":
+                mx, my, mz = 0.0, 0.0, 1.0
+                u_raw = make_uniform_u_raw(N, InitialState(mx, my, mz), scale=1.0)
+            elif ini == "vortex":
+                u_raw = make_vortex_yz(knt)
+            else:
+                print("unknown initial state")
+                sys.exit()
+        else:
+            u_raw = make_uniform_u_raw(N, init=p2cfg.initial, scale=1.0)
+
+        aux_prev = (
+            jnp.zeros((knt.shape[0], 3), dtype=jnp.float64)
+            if ms_mode == "A"
+            else jnp.zeros((knt.shape[0],), dtype=jnp.float64)
+        )
 
     h_vals = _h_schedule(field.hstart, field.hfinal, field.hstep)
     dat_path = f"{basename}.dat"
@@ -708,46 +881,94 @@ def step7_demag_sweep(
             [field.hx * hmag, field.hy * hmag, field.hz * hmag], dtype=jnp.float64
         )
 
-        E_norm, u_star, aux_star, parts_norm = minimize_energy_lbfgs(
-            initial_u_raw=u_raw,
-            initial_A=aux_prev,
-            A_t=amg.A_t,
-            P_t=amg.P_t,
-            R_t=amg.R_t,
-            Dinv_t=amg.Dinv_t,
-            L_c=amg.L_c,
-            conn=geom.conn,
-            grad_phi=geom.grad_phi,
-            volume=geom.volume,
-            mat_id=geom.mat_id,
-            Ms_lookup=materials.Ms_lookup,
-            A_lookup_exchange=materials.A_lookup_exchange,
-            K1_lookup=materials.K1_lookup,
-            k_easy_e=materials.k_easy_e,
-            H_ext=H_ext,
-            E_ref=E_ref,
-            tol=a_tol,
-            maxiter=a_maxiter,
-            nu_pre=a_nu_pre,
-            nu_post=a_nu_post,
-            omega=a_omega,
-            coarse_iters=a_coarse_iters,
-            coarse_omega=a_coarse_omega,
-            eps_norm=1e-12,
-            gauge=(gauge if ms_mode == "A" else 0.0),
-            ms_mode=ms_mode,
-            history_size=lbfgs_history,
-            outer_max_iter=lbfgs_it,
-            grad_tol=grad_tol,
-            debug_lbfgs=debug_lbfgs,
-            H0_mode=h0_mode,
-            ls_init_mode=ls_init,
-            ls_init_stepsize=ls_init_stepsize,
-            ls_max_stepsize=ls_max_stepsize,
-            ls_increase_factor=ls_increase_factor,
-            ls_print=debug_lbfgs,
-            diag_u=diag_u,
-        )
+        if solver=='lbfgs':
+            E_norm, u_star, aux_star, parts_norm = minimize_energy_lbfgs(
+                initial_u_raw=u_raw,
+                initial_A=aux_prev,
+                A_t=amg.A_t,
+                P_t=amg.P_t,
+                R_t=amg.R_t,
+                Dinv_t=amg.Dinv_t,
+                L_c=amg.L_c,
+                conn=geom.conn,
+                grad_phi=geom.grad_phi,
+                volume=geom.volume,
+                mat_id=geom.mat_id,
+                Ms_lookup=materials.Ms_lookup,
+                A_lookup_exchange=materials.A_lookup_exchange,
+                K1_lookup=materials.K1_lookup,
+                k_easy_e=materials.k_easy_e,
+                H_ext=H_ext,
+                E_ref=E_ref,
+                tol=a_tol,
+                maxiter=a_maxiter,
+                nu_pre=a_nu_pre,
+                nu_post=a_nu_post,
+                omega=a_omega,
+                coarse_iters=a_coarse_iters,
+                coarse_omega=a_coarse_omega,
+                eps_norm=1e-12,
+                gauge=(gauge if ms_mode == "A" else 0.0),
+                ms_mode=ms_mode,
+                history_size=lbfgs_history,
+                outer_max_iter=lbfgs_it,
+                grad_tol=grad_tol,
+                debug_lbfgs=debug_lbfgs,
+                H0_mode=h0_mode,
+                ls_init_mode=ls_init,
+                ls_init_stepsize=ls_init_stepsize,
+                ls_max_stepsize=ls_max_stepsize,
+                ls_increase_factor=ls_increase_factor,
+                ls_print=debug_lbfgs,
+                ls_kind=ls_kind,
+                ls_c1=ls_c1,
+                ls_c2=ls_c2,
+                ls_decrease=ls_decrease,
+                damping_delta=damping_delta,
+                diag_u=diag_u,
+            )
+        else:
+            E_norm, u_star, aux_star, parts_norm, alpha_out = minimize_energy_bb(
+                initial_u_raw=u_raw,
+                initial_A=aux_prev,
+                A_t=amg.A_t,
+                P_t=amg.P_t,
+                R_t=amg.R_t,
+                Dinv_t=amg.Dinv_t,
+                L_c=amg.L_c,
+                conn=geom.conn,
+                grad_phi=geom.grad_phi,
+                volume=geom.volume,
+                mat_id=geom.mat_id,
+                Ms_lookup=materials.Ms_lookup,
+                A_lookup_exchange=materials.A_lookup_exchange,
+                K1_lookup=materials.K1_lookup,
+                k_easy_e=materials.k_easy_e,
+                H_ext=H_ext,
+                E_ref=E_ref,
+                tol=a_tol,
+                maxiter=a_maxiter,
+                nu_pre=a_nu_pre,
+                nu_post=a_nu_post,
+                omega=a_omega,
+                coarse_iters=a_coarse_iters,
+                coarse_omega=a_coarse_omega,
+                eps_norm=1e-12,
+                gauge=(gauge if ms_mode == "A" else 0.0),
+                ms_mode=ms_mode,
+                outer_max_iter=lbfgs_it,      # reuse same CLI knob for iterations
+                grad_tol=grad_tol,            # reuse tol from CLI
+                bb_variant=bb_variant,        # or "bb1"/"bb2" if you prefer
+                debug_bb=debug_lbfgs,         # reuse debug flag
+                ls_init_stepsize=bb_alpha_prev,
+                ls_max_stepsize=ls_max_stepsize,
+                ls_print=debug_lbfgs,
+                # --- NEW: enable block-Jacobi preconditioning for BB
+                precond_mode=("block_jacobi" if h0_mode == "block_jacobi" else "none"),
+                diag_u=diag_u,                  # (N,3,3) Minv from precompute_block_jacobi_* (already computed above)
+                bb2_precond=bb2_precond,
+            )        
+            bb_alpha_prev = float(alpha_out)
 
         m_nodes = _m_from_u_raw(u_star)
         u_raw = m_nodes
@@ -838,7 +1059,7 @@ def main():
         "--size", type=float, default=None, help="overwrite mesh units in p2 file"
     )
     ap.add_argument(
-        "--ini", choices=["uniform", "vortex"], default=None, help="Initial state"
+        "--ini", default=None, help="Initial state (uniform, vortex, or number)"
     )
     ap.add_argument("--K", type=float, default=None)
     ap.add_argument("--KL", type=float, default=None)
@@ -917,7 +1138,32 @@ def main():
         default=1.5,
         help="Expansion factor when --ls-init=increase.",
     )
-
+    ap.add_argument(
+        "--ls-kind",
+        choices=["default", "armijo", "goldstein", "wolfe", "strong-wolfe"],
+        default="default",
+        help=(
+            "Line-search flavor for L-BFGS: 'default' keeps JAXopt's zoom Strong-Wolfe; "
+            "otherwise use a backtracking line search with the chosen condition."
+        ),
+    )
+    ap.add_argument("--ls-c1", type=float, default=1e-4,
+                    help="Line-search c1 (sufficient decrease) for backtracking LS.")
+    ap.add_argument("--ls-c2", type=float, default=0.9,
+                    help="Line-search c2 (curvature) for backtracking Wolfe/Strong-Wolfe.")
+    ap.add_argument("--ls-decrease", type=float, default=0.5,
+                    help="Backtracking decrease factor (shrink multiplier, in (0,1)).")
+    ap.add_argument("--damping-delta", type=float, default=0.2,
+                    help="Powell damping delta; enforces s^T ỹ ≥ delta * s^T B s.")
+    ap.add_argument(
+    "--solver",
+    choices=["lbfgs", "bb"],
+    default="lbfgs",
+    help="Outer minimizer: L-BFGS (two-loop) or Barzilai Borwein."
+    )
+    ap.add_argument("--bb-variant", choices=["alt","bb1","bb2"], default="bb2",
+                    help="variant of Barzilai-Borwein method")
+    ap.add_argument("--bb2-precond", action="store_true")
     args = ap.parse_args()
 
     # Step 1
@@ -1132,6 +1378,14 @@ def main():
             ls_init_stepsize=args.ls_init_stepsize,
             ls_max_stepsize=args.ls_max_stepsize,
             ls_increase_factor=args.ls_increase,
+            ls_kind=args.ls_kind,
+            ls_c1=args.ls_c1,
+            ls_c2=args.ls_c2,
+            ls_decrease=args.ls_decrease,
+            damping_delta=args.damping_delta,
+            solver=args.solver,
+            bb_variant=args.bb_variant,
+            bb2_precond=args.bb2_precond,
         )
         print(f"[Step 7] Sweep finished. Appended results to {base}.dat")
     elif args.no_demag:

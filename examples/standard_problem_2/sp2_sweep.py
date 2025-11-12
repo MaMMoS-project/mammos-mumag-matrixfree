@@ -43,7 +43,7 @@ import matplotlib.pyplot as plt
 import re
 
 # ---- Constants ----
-BASE_L_EX = 30.0                     # reference size in l_ex
+BASE_D_EX = 30.0                     # reference width in l_ex
 DEFAULT_MESH_UNITS_M = 1e-9          # 1 nm in meters
 MU0 = 4 * math.pi * 1e-7             # H/m
 JS = 1.0                             # T
@@ -162,8 +162,8 @@ def loop_py_path() -> Path:
 # ---------- Helpers ----------
 
 def compute_size_units(L_lex: float) -> float:
-    """--size = (L / 8.6) * 1e-9  [meters]"""
-    return (L_lex / BASE_L_EX) * DEFAULT_MESH_UNITS_M
+    """--size = (L / BASE_L_LEX) * 1e-9  [meters]"""
+    return (L_lex / BASE_D_EX) * DEFAULT_MESH_UNITS_M
 
 def frange(start: float, stop: float, step: float):
     """Inclusive floating range with tolerance."""
@@ -304,7 +304,7 @@ def run_single(L_lex: float, write_vtu: bool, extra_args: list[str]) -> Tuple[fl
         cmd.extend(extra_args)
 
     print(f"\n[run] L={L_lex:.3f} ℓ_ex   size_units={size_units:.3e} m")
-    print("[run] ", " ".join(cmd))
+    print("[run] ", " ".join(cmd),flush=True)
     print(f"[debug] run root: {run_root()}")
     print(f"[debug] loop.py:  {lp}")
     print(f"[debug] mesh:     {mp}")

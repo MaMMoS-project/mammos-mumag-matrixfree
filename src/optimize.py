@@ -16,7 +16,7 @@ from typing import Optional, Tuple, Any, Callable
 import jax
 import jax.numpy as jnp
 from jax import tree_util as jtu
-from jaxopt import LBFGS
+from jaxopt import LBFGS, BacktrackingLineSearch
 from geom import TetGeom
 from energies import (
     brown_energy_and_grad_from_m,
@@ -195,6 +195,47 @@ def _u_raw_to_m_and_grad_u(
     grad_u_raw = (grad_m_norm - gm_dot_m * m_nodes) / r_safe[:, None]
     return m_nodes, grad_u_raw
 
+def _normalize_u(params: jnp.ndarray, eps: float = 1e-12) -> jnp.ndarray:
+    """Row-wise normalize u to unit vectors; leaves near-zero rows at eps scale."""
+    r = jnp.linalg.norm(params, axis=1, keepdims=True)
+    r_safe = jnp.maximum(r, jnp.asarray(eps, params.dtype))
+    return params / r_safe
+
+def _apply_precond_tangent(
+    params: jnp.ndarray,
+    r: jnp.ndarray,
+    *,
+    precond_mode: str = "none",   # "none" | "diag" | "block_jacobi"
+    diag_u=None,                  # (N,) for "diag"  or (N,3,3) Minv for "block_jacobi"
+    eps: float = 1e-12,
+) -> jnp.ndarray:
+    """
+    Project r onto the tangent at m = normalize(params), then apply the preconditioner P.
+
+    Returns P * r_tan with:
+      - "none": identity   (P = I)
+      - "diag": P = diag^{-1} on the tangent (per-node scalar inverse)
+      - "block_jacobi": P = Minv (N,3,3) on the tangent
+
+    Shapes:
+      params, r : (N, 3)
+      diag_u    : (N,) for "diag", or (N,3,3) for "block_jacobi"
+    """
+    m = _normalize_u(params, eps=eps)                 # (N,3)
+    r_tan = r - jnp.sum(r * m, axis=1, keepdims=True) * m
+
+    if precond_mode == "none" or diag_u is None:
+        return r_tan
+    elif precond_mode == "diag":
+        diag = diag_u  # (N,)
+        inv_diag = 1.0 / jnp.maximum(diag, jnp.asarray(1e-30, diag.dtype))
+        return r_tan * inv_diag[:, None]
+    elif precond_mode == "block_jacobi":
+        Minv = diag_u  # (N,3,3)
+        return jnp.einsum("nij,nj->ni", Minv, r_tan)
+    else:
+        raise ValueError(f"unknown precond_mode={precond_mode!r}")
+
 # =============================================================================
 # Analytic value+grad with aux (A or U warm-start) — normalized by E_ref
 # =============================================================================
@@ -368,24 +409,28 @@ def make_fun_for_jaxopt(
 # =============================================================================
 # Two-loop L-BFGS driver (no CG branch)
 # =============================================================================
+
 def run_jaxopt_lbfgs_twoloop(
     init_params,
     init_aux_flat,
     *,
-    # for val/grad call
     fun_value_and_grad,
-    # LBFGS/LS
-    history_size: int, max_iter: int, grad_tol: float,
-    # H0 choices (no CG):
-    H0_mode: str = "gamma",  # "gamma" | "identity" | "bb" | "bb1" | "bb2" | "diag" | "block_jacobi"
-    # LS telemetry:
-    ls_init_mode: str = "current",  # "current" | "max" | "value" | "increase"
+    history_size: int,
+    max_iter: int,
+    grad_tol: float,
+    H0_mode: str = "gamma",
+    ls_init_mode: str = "increase",
     ls_init_stepsize: float = 1.0,
     ls_max_stepsize: float = 1.0,
-    ls_increase_factor: float = 2.0,
+    ls_increase_factor: float = 1.5,
     ls_print: bool = True,
     debug: bool = False,
-    diag_u = None,  # (N,) for "diag", or (N,3,3) Minv for "block_jacobi"
+    ls_kind: str = "default",  
+    ls_c1: float = 1e-4,
+    ls_c2: float = 0.9,
+    ls_decrease: float = 0.5,
+    damping_delta: float = 0.2,
+    diag_u=None,
 ):
     solver = LBFGS(
         fun=fun_value_and_grad,
@@ -399,14 +444,29 @@ def run_jaxopt_lbfgs_twoloop(
         max_stepsize=ls_max_stepsize,
         maxls=60,
     )
+
+    # Override LS if requested
+    if ls_kind != "default":
+        solver.ls = BacktrackingLineSearch(
+            fun=fun_value_and_grad,
+            value_and_grad=True,
+            has_aux=True,
+            maxiter=60,
+            condition=ls_kind,  # armijo, goldstein, wolfe, strong-wolfe
+            c1=ls_c1,
+            c2=ls_c2,
+            decrease_factor=ls_decrease,
+            max_stepsize=ls_max_stepsize,
+        )
+
     params0 = init_params
     state0 = solver.init_state(params0, init_aux_flat)
     f_init = state0.value
-
     carry0 = (params0, state0, params0, f_init)
+
     TauF = jnp.asarray(grad_tol, dtype=params0.dtype)
     TauF_sqrt = jnp.sqrt(TauF)
-    TauF_cuberoot = jnp.power(TauF, 1.0 / 3.0)
+    TauF_cuberoot = TauF ** (1.0 / 3.0)
     epsM = jnp.asarray(jnp.finfo(params0.dtype).eps, dtype=params0.dtype)
 
     def cond_fun(carry):
@@ -414,128 +474,60 @@ def run_jaxopt_lbfgs_twoloop(
         f_k = state.value
         g_k = state.grad
         it = state.iter_num
-
         x_norm = jnp.linalg.norm(params, ord=jnp.inf)
         step_norm = jnp.linalg.norm(params - x_prev, ord=jnp.inf)
         g_norm = jnp.linalg.norm(g_k, ord=jnp.inf)
-
         eta_hat = TauF * (1.0 + jnp.abs(f_k))
         eps_A = epsM * (1.0 + jnp.abs(f_k))
-
-        def u1_eval(_): return jnp.abs(f_prev - f_k) <= eta_hat
-        def u2_eval(_): return step_norm <= (TauF_sqrt * (1.0 + x_norm))
-
-        fun_ok = jax.lax.cond(it > 0, u1_eval, lambda _: False, operand=None)
-        step_ok = jax.lax.cond(it > 0, u2_eval, lambda _: False, operand=None)
+        fun_ok = jax.lax.cond(it > 0, lambda _: jnp.abs(f_prev - f_k) <= eta_hat, lambda _: False, operand=None)
+        step_ok = jax.lax.cond(it > 0, lambda _: step_norm <= (TauF_sqrt * (1.0 + x_norm)), lambda _: False, operand=None)
         grad_ok = g_norm <= (TauF_cuberoot * (1.0 + jnp.abs(f_k)))
-        grad_abs_ok = g_norm < eps_A  # reserved
-
-        if debug:
-            u1_i = fun_ok.astype(jnp.int32)
-            u2_i = step_ok.astype(jnp.int32)
-            u3_i = grad_ok.astype(jnp.int32)
-            u4_i = grad_abs_ok.astype(jnp.int32)
-            jax.debug.print(
-                "[it:{:03d}] f {:.9e}\n g {:.3e} Δx {:.3e} U:{} {} {} {}",
-                state.iter_num, f_k, g_norm, step_norm, u1_i, u2_i, u3_i, u4_i
-            )
-
-        success = (fun_ok & step_ok & grad_ok)  # grad_abs_ok
+        grad_abs_ok = g_norm < eps_A
+        success = (fun_ok & step_ok & grad_ok) | grad_abs_ok
         return jnp.logical_and(~success, it < max_iter)
 
     def body_fun(carry):
         params, state, x_prev, f_prev = carry
 
-        # α0 selection for line-search
+        # Select initial stepsize
         if ls_init_mode == "value" and (ls_init_stepsize is not None):
             init_stepsize = jnp.asarray(ls_init_stepsize, dtype=params.dtype)
         elif ls_init_mode == "current":
             init_stepsize = state.stepsize
         elif ls_init_mode == "increase":
             is_first = (state.iter_num == 0)
-            base = jax.lax.cond(
-                is_first,
-                lambda _: jnp.asarray(ls_init_stepsize, dtype=params.dtype),
-                lambda _: state.stepsize,
-                operand=None,
-            )
-            init_stepsize = jax.lax.cond(
-                is_first,
-                lambda _: jnp.minimum(base, solver.max_stepsize),
-                lambda _: jnp.minimum(base * jnp.asarray(ls_increase_factor, base.dtype),
-                                      solver.max_stepsize),
-                operand=None,
-            )
+            base = jax.lax.cond(is_first,
+                                lambda _: jnp.asarray(ls_init_stepsize, dtype=params.dtype),
+                                lambda _: state.stepsize,
+                                operand=None)
+            init_stepsize = jax.lax.cond(is_first,
+                                         lambda _: jnp.minimum(base, solver.max_stepsize),
+                                         lambda _: jnp.minimum(base * jnp.asarray(ls_increase_factor, base.dtype),
+                                                               solver.max_stepsize),
+                                         operand=None)
         else:
-            init_stepsize = solver.max_stepsize  # "max"
+            init_stepsize = solver.max_stepsize
 
-        # Build H0 operator (no CG branch)
+        # Build H0 operator
         if H0_mode == "gamma":
             gamma = state.gamma
-            H0_matvec = (lambda r, g=gamma: jtu.tree_map(lambda x: g * x, r))
-        elif H0_mode == "bb":
-            if solver.history_size:
-                def _alpha_with_hist(_):
-                    idx = (state.iter_num - 1) % solver.history_size
-                    s_last = jtu.tree_map(lambda H: H[idx], state.s_history)
-                    y_last = jtu.tree_map(lambda H: H[idx], state.y_history)
-                    sty = _tree_vdot(s_last, y_last)
-                    sts = _tree_vdot(s_last, s_last)
-                    yty = _tree_vdot(y_last, y_last)
-                    alpha_bb1 = jnp.where(sty > 0.0, sts / jnp.maximum(sty, 1e-30), 1.0)
-                    alpha_bb2 = jnp.where(yty > 0.0, sty / jnp.maximum(yty, 1e-30), 1.0)
-                    return jnp.sqrt(alpha_bb1 * alpha_bb2)
-                def _alpha_no_hist(_): return jnp.asarray(1.0, dtype=state.rho_history.dtype)
-                alpha = jax.lax.cond(state.iter_num > 0, _alpha_with_hist, _alpha_no_hist, operand=None)
-            else:
-                alpha = jnp.asarray(1.0, dtype=state.rho_history.dtype)
-            H0_matvec = (lambda r, a=alpha: jtu.tree_map(lambda x: a * x, r))
-        elif H0_mode == "bb1":
-            if solver.history_size:
-                def _alpha_with_hist(_):
-                    idx = (state.iter_num - 1) % solver.history_size
-                    s_last = jtu.tree_map(lambda H: H[idx], state.s_history)
-                    y_last = jtu.tree_map(lambda H: H[idx], state.y_history)
-                    sty = _tree_vdot(s_last, y_last)
-                    sts = _tree_vdot(s_last, s_last)
-                    alpha_bb1 = jnp.where(sty > 0.0, sts / jnp.maximum(sty, 1e-30), 1.0)
-                    return alpha_bb1
-                def _alpha_no_hist(_): return jnp.asarray(1.0, dtype=state.rho_history.dtype)
-                alpha = jax.lax.cond(state.iter_num > 0, _alpha_with_hist, _alpha_no_hist, operand=None)
-            else:
-                alpha = jnp.asarray(1.0, dtype=state.rho_history.dtype)
-            H0_matvec = (lambda r, a=alpha: jtu.tree_map(lambda x: a * x, r))
-        elif H0_mode == "bb2":
-            if solver.history_size:
-                def _alpha_with_hist(_):
-                    idx = (state.iter_num - 1) % solver.history_size
-                    s_last = jtu.tree_map(lambda H: H[idx], state.s_history)
-                    y_last = jtu.tree_map(lambda H: H[idx], state.y_history)
-                    sty = _tree_vdot(s_last, y_last)
-                    yty = _tree_vdot(y_last, y_last)
-                    alpha_bb2 = jnp.where(yty > 0.0, sty / jnp.maximum(yty, 1e-30), 1.0)
-                    return alpha_bb2
-                def _alpha_no_hist(_): return jnp.asarray(1.0, dtype=state.rho_history.dtype)
-                alpha = jax.lax.cond(state.iter_num > 0, _alpha_with_hist, _alpha_no_hist, operand=None)
-            else:
-                alpha = jnp.asarray(1.0, dtype=state.rho_history.dtype)
-            H0_matvec = (lambda r, a=alpha: jtu.tree_map(lambda x: a * x, r))
-        elif H0_mode == "diag":
-            diag = diag_u  # (N,)
-            def H0_matvec(r):
-                u = params
-                m = u / jnp.maximum(jnp.linalg.norm(u, axis=1, keepdims=True), jnp.asarray(1e-12, u.dtype))
-                r_tan = r - jnp.sum(r * m, axis=1, keepdims=True) * m
-                return r_tan * (1.0 / jnp.maximum(diag, jnp.asarray(1e-30, diag.dtype)) )[:, None]
-        elif H0_mode == "block_jacobi":
-            Minv = diag_u  # (N,3,3)
-            def H0_matvec(r):
-                u = params
-                m = u / jnp.maximum(jnp.linalg.norm(u, axis=1, keepdims=True), jnp.asarray(1e-12, u.dtype))
-                r_tan = r - jnp.sum(r * m, axis=1, keepdims=True) * m
-                return jnp.einsum('nij,nj->ni', Minv, r_tan)
+            H0_matvec = lambda r, g=gamma: jtu.tree_map(lambda x: g * x, r)
         elif H0_mode == "identity":
-            H0_matvec = (lambda r: r)
+            H0_matvec = lambda r: r
+        elif H0_mode == "diag":
+            diag = diag_u
+            def H0_matvec(r):
+                u = params
+                m = u / jnp.maximum(jnp.linalg.norm(u, axis=1, keepdims=True), jnp.asarray(1e-12, u.dtype))
+                r_tan = r - jnp.sum(r * m, axis=1, keepdims=True) * m
+                return r_tan * (1.0 / jnp.maximum(diag, jnp.asarray(1e-30, diag.dtype)))[:, None]
+        elif H0_mode == "block_jacobi":
+            Minv = diag_u
+            def H0_matvec(r):
+                u = params
+                m = u / jnp.maximum(jnp.linalg.norm(u, axis=1, keepdims=True), jnp.asarray(1e-12, u.dtype))
+                r_tan = r - jnp.sum(r * m, axis=1, keepdims=True) * m
+                return jnp.einsum("nij,nj->ni", Minv, r_tan)
         else:
             raise ValueError(f"Unknown H0_mode={H0_mode!r}.")
 
@@ -543,72 +535,72 @@ def run_jaxopt_lbfgs_twoloop(
         descent = jtu.tree_map(lambda g: -g, state.grad)
         if solver.history_size:
             start = state.iter_num % solver.history_size
-            descent = _inv_hessian_product_H0(
-                descent, state.s_history, state.y_history, state.rho_history, start,
-                H0_matvec
-            )
+            descent = _inv_hessian_product_H0(descent, state.s_history, state.y_history,
+                                              state.rho_history, start, H0_matvec)
 
         # Ensure descent
         gtd = _tree_vdot(state.grad, descent)
-        descent = jax.lax.cond(
-            gtd < 0,
-            lambda _: descent,
-            lambda _: jtu.tree_map(lambda g: -g, state.grad),
-            operand=None,
-        )
+        descent = jax.lax.cond(gtd < 0, lambda _: descent,
+                               lambda _: jtu.tree_map(lambda g: -g, state.grad),
+                               operand=None)
 
         # Line search
-        new_stepsize, ls_state = solver.run_ls(
-            init_stepsize,
-            params,
-            value=state.value,
-            grad=state.grad,
-            descent_direction=descent,
-            fun_args=(state.aux,),
-            fun_kwargs={}
-        )
-
-        new_params = ls_state.params
+        new_stepsize, ls_state = solver.run_ls(init_stepsize, params,
+                                               value=state.value, grad=state.grad,
+                                               descent_direction=descent,
+                                               fun_args=(state.aux,), fun_kwargs={})
+        new_params = _normalize_u(ls_state.params)
         new_value = ls_state.value
         new_grad = ls_state.grad
         new_aux = ls_state.aux
 
-        # Update histories
+        # Powell damping for curvature
         s = jtu.tree_map(lambda a, b: a - b, new_params, params)
         y = jtu.tree_map(lambda a, b: a - b, new_grad, state.grad)
-        vdot_sy = _tree_vdot(s, y)
-        rho = jnp.where(vdot_sy == 0.0, 0.0, 1.0 / vdot_sy)
+        delta = jnp.asarray(damping_delta, dtype=new_params.dtype)
+        sTs = _tree_vdot(s, s)
+        gamma_safe = jnp.maximum(state.gamma, jnp.asarray(1e-30, state.gamma.dtype))
+        sT_B_s = sTs / gamma_safe
+        sTy = _tree_vdot(s, y)
+        need_damp = sTy < (delta * sT_B_s)
+        theta = ((1.0 - delta) * sT_B_s) / jnp.maximum(sT_B_s - sTy, jnp.asarray(1e-30, sT_B_s.dtype))
+        Bs = jtu.tree_map(lambda si: si / gamma_safe, s)
+        y_tilde = jtu.tree_map(lambda yi, si_B: theta * yi + (1.0 - theta) * si_B, y, Bs)
+        y_used = jtu.tree_map(lambda y0, yd: jax.lax.select(need_damp, yd, y0), y, y_tilde)
+        sTy_used = _tree_vdot(s, y_used)
+        rho = jnp.where(sTy_used > 0.0, 1.0 / sTy_used, 0.0)
 
+        # Update histories (skip if curvature still bad)
         s_hist = state.s_history
         y_hist = state.y_history
         rho_hist = state.rho_history
         if solver.history_size:
             start = state.iter_num % solver.history_size
-            s_hist = jtu.tree_map(lambda H, v: H.at[start].set(v), s_hist, s)
-            y_hist = jtu.tree_map(lambda H, v: H.at[start].set(v), y_hist, y)
-            rho_hist = rho_hist.at[start].set(rho)
+            write_mask = (sTy_used > 0.0)
+            s_prev_slot = jtu.tree_map(lambda H: H[start], s_hist)
+            y_prev_slot = jtu.tree_map(lambda H: H[start], y_hist)
+            rho_prev = rho_hist[start]
+            s_to_write = jtu.tree_map(lambda newv, prev: jax.lax.select(write_mask, newv, prev), s, s_prev_slot)
+            y_to_write = jtu.tree_map(lambda newv, prev: jax.lax.select(write_mask, newv, prev), y_used, y_prev_slot)
+            rho_to_write = jax.lax.select(write_mask, rho, rho_prev)
+            s_hist = jtu.tree_map(lambda H, v: H.at[start].set(v), s_hist, s_to_write)
+            y_hist = jtu.tree_map(lambda H, v: H.at[start].set(v), y_hist, y_to_write)
+            rho_hist = rho_hist.at[start].set(rho_to_write)
 
-        # gamma from just-written slot (or 1 if no history)
-        realdtype = state.rho_history.dtype
-        if solver.history_size:
-            last = start
-            gamma_new = _compute_gamma_scalar(s_hist, y_hist, last)
-        else:
-            gamma_new = jnp.asarray(1.0, dtype=realdtype)
+        gamma_new = jax.lax.select(write_mask, _compute_gamma_scalar(s_hist, y_hist, start), state.gamma)
 
         if ls_print or debug:
-            jax.debug.print(
-                " it {:02d} α0 {:.3e} α {:.3e} {} g·d {:+.3e} γ: {:.3e}",
-                ls_state.iter_num, init_stepsize, new_stepsize, ls_state.failed, gtd, gamma_new
-            )
+            jax.debug.print("{:04d} f {:.6e} it {:02d} α0 {:.3e} α {:.3e} {} g·d {:+.3e} γ: {:.3e}",
+                            state.iter_num, new_value,ls_state.iter_num, init_stepsize, new_stepsize,
+                            ls_state.failed, gtd, gamma_new)
 
         error = jnp.linalg.norm(new_grad, ord=jnp.inf)
         new_state = type(state)(
             iter_num=state.iter_num + 1,
             value=new_value,
             grad=new_grad,
-            stepsize=jnp.asarray(new_stepsize, dtype=realdtype),
-            error=jnp.asarray(error, dtype=realdtype),
+            stepsize=jnp.asarray(new_stepsize, dtype=state.rho_history.dtype),
+            error=jnp.asarray(error, dtype=state.rho_history.dtype),
             s_history=s_hist,
             y_history=y_hist,
             rho_history=rho_hist,
@@ -619,11 +611,11 @@ def run_jaxopt_lbfgs_twoloop(
             num_grad_eval=state.num_grad_eval + ls_state.num_grad_eval,
             num_linesearch_iter=state.num_linesearch_iter + ls_state.iter_num,
         )
-
         return new_params, new_state, params, state.value
 
     params_star, state_star, _, _ = jax.lax.while_loop(cond_fun, body_fun, carry0)
     return params_star, state_star
+
 
 # =============================================================================
 # Front-end
@@ -657,11 +649,16 @@ def minimize_energy_lbfgs(
     # Two-loop H0 (no CG):
     H0_mode: str = "gamma",
     # LS knobs:
-    ls_init_mode: str = "current",
+    ls_init_mode: str = "increase",
     ls_init_stepsize: float = 1.0,
     ls_max_stepsize: float = 1.0,
-    ls_increase_factor: float = 2.0,
+    ls_increase_factor: float = 1.5,
     ls_print: bool = True,
+    ls_kind: str = "default",
+    ls_c1: float = 1e-4,
+    ls_c2: float = 0.9,
+    ls_decrease: float = 0.5,
+    damping_delta: float = 0.2,
     diag_u=None,  # optional precomputed diag or Minv
 ):
     N = initial_u_raw.shape[0]
@@ -693,6 +690,9 @@ def minimize_energy_lbfgs(
         ls_init_mode=ls_init_mode, ls_init_stepsize=ls_init_stepsize,
         ls_max_stepsize=ls_max_stepsize, ls_increase_factor=ls_increase_factor, ls_print=ls_print,
         debug=debug_lbfgs,
+        ls_kind=ls_kind,
+        ls_c1=ls_c1, ls_c2=ls_c2, ls_decrease=ls_decrease,
+        damping_delta=damping_delta,
         diag_u=diag_u
     )
 
@@ -717,8 +717,336 @@ minimize_energy_lbfgs = jax.jit(
         "H0_mode",
         "ls_init_mode", "ls_init_stepsize", "ls_max_stepsize", "ls_print", "ls_increase_factor",
         "ms_mode",
+        "ls_kind",
     ),
 )
+
+# =============================================================================
+# Barzilai–Borwein (spectral gradient) driver with Armijo line-search
+# =============================================================================
+
+def run_bb_gradient(
+    init_params,
+    init_aux_flat,
+    *,
+    fun_value_and_grad,
+    max_iter: int,
+    grad_tol: float,
+    bb_variant: str = "alt",          # "alt", "bb1", "bb2"
+    stepsize_init: float = 1.0,
+    stepsize_max: float = 1.0,
+    stepsize_min: float = 1e-16,
+    ls_print: bool = True,
+    debug: bool = False,
+    # --- NEW: preconditioning ---
+    precond_mode: str = "none",      # "none" | "diag" | "block_jacobi"
+    diag_u=None,                     # (N,) or (N,3,3) Minv depending on mode
+    # --- OPTIONAL: preconditioned BB2 stepsize ---
+    bb2_precond: bool = False,       # if True: alpha = (s^T y)/(y^T P y)
+):
+    """
+    Spectral Gradient (Barzilai–Borwein) + Armijo line-search,
+    with an *early-accept* path that skips the line-search when near-stationary.
+
+    Minimal BB rule (with clamping):
+      s = x_k - x_{k-1},  y = g_k - g_{k-1}
+      BB1: alpha = (s^T s) / (s^T y)
+      BB2: alpha = (s^T y) / (y^T y)
+
+    The value+grad callable already maps u_raw -> m and projects the gradient to
+    the tangent plane, so descent = -grad is consistent with the geometry.
+    """
+    # Armijo line-search (slightly looser near optimum)
+    ls = BacktrackingLineSearch(
+        fun=fun_value_and_grad,
+        value_and_grad=True,
+        has_aux=True,
+        maxiter=60,
+        condition="armijo",
+        c1=1e-3,                # default is 1e-4; 1e-3 helps near a minimizer
+        decrease_factor=0.5,
+    )
+
+    # Initial evaluation (your fun internally normalizes via u->m map)
+    (f0, (aux_flat0, parts0)), g0 = fun_value_and_grad(init_params, init_aux_flat)
+    params0 = _normalize_u(init_params)  # keep stored params normalized for safety
+    aux_args0 = (aux_flat0,)
+
+    # Tolerances like your L-BFGS loop
+    TauF = jnp.asarray(grad_tol, dtype=params0.dtype)
+    TauF_sqrt = jnp.sqrt(TauF)
+    TauF_cuberoot = jnp.power(TauF, 1.0 / 3.0)
+    epsM = jnp.asarray(jnp.finfo(params0.dtype).eps, dtype=params0.dtype)
+
+    # BB bookkeeping
+    x_prev = params0
+    g_prev = g0
+    f_prev = f0
+    alpha_prev = jnp.asarray(stepsize_init, dtype=params0.dtype)
+    it0 = jnp.asarray(0, jnp.int32)
+
+    # Carry: (params, f_k, g_k, aux_args, x_prev, g_prev, f_prev, alpha_prev, it, parts_last)
+    carry0 = (params0, f0, g0, aux_args0, x_prev, g_prev, f_prev, alpha_prev, it0, parts0)
+
+    def cond_fun(carry):
+        params, f_k, g_k, aux_args, x_prev, g_prev, f_prev, alpha_prev, it, parts_last = carry
+        x_norm   = jnp.linalg.norm(params, ord=jnp.inf)
+        g_norm   = jnp.linalg.norm(g_k, ord=jnp.inf)
+        step_norm= jnp.linalg.norm(params - x_prev, ord=jnp.inf)
+
+        eta_hat  = TauF * (1.0 + jnp.abs(f_k))
+        eps_A    = epsM * (1.0 + jnp.abs(f_k))
+
+        fun_ok   = jax.lax.cond(it > 0, lambda _: jnp.abs(f_prev - f_k) <= eta_hat, lambda _: False, operand=None)
+        step_ok  = jax.lax.cond(it > 0, lambda _: step_norm <= (TauF_sqrt * (1.0 + x_norm)), lambda _: False, operand=None)
+        grad_ok  = g_norm <= (TauF_cuberoot * (1.0 + jnp.abs(f_k)))
+        grad_abs_ok = g_norm < eps_A  # hard floor
+
+        if debug:
+            jax.debug.print(
+                "[BB it:{:03d}] f {:+.9e}  |g|_inf {:.3e}  Δx_inf {:.3e}  U:{} {} {} {}",
+                it, f_k, g_norm, step_norm,
+                fun_ok.astype(jnp.int32), step_ok.astype(jnp.int32),
+                grad_ok.astype(jnp.int32), grad_abs_ok.astype(jnp.int32)
+            )
+
+        success = (fun_ok & step_ok & grad_ok) | grad_abs_ok
+        return jnp.logical_and(~success, it < max_iter)
+
+    def body_fun(carry):
+        params, f_k, g_k, aux_args, x_prev, g_prev, f_prev, alpha_prev, it, parts_last = carry
+
+        # Preconditioned tangent descent: d = - P * g
+        Pg = _apply_precond_tangent(params, g_k, precond_mode=precond_mode, diag_u=diag_u)
+        descent = jtu.tree_map(lambda x: -x, Pg)
+
+        # ---- Minimal BB stepsize (alt/bb1/bb2) with guard + clamp ----
+        s   = jtu.tree_map(lambda a, b: a - b, params, x_prev)
+        y   = jtu.tree_map(lambda a, b: a - b, g_k, g_prev)
+        sty = _tree_vdot(s, y)
+        sts = _tree_vdot(s, s)
+        yty = _tree_vdot(y, y)
+
+        alpha_bb1 = sts / jnp.maximum(sty, 1e-30)   # can be negative if sty <= 0
+        if bb2_precond:
+            # denom = y^T P y  (P same as used in the direction; use current params for the tangent projector)
+            Py = _apply_precond_tangent(params, y, precond_mode=precond_mode, diag_u=diag_u)
+            yPy = _tree_vdot(y, Py)
+            # Form BB2^P; BB1 unchanged (we don't want P^{-1})
+            alpha_bb2 = jnp.where(yPy > 0.0, sty / jnp.maximum(yPy, 1e-30), alpha_prev)
+        else:
+            alpha_bb2 = sty / jnp.maximum(yty, 1e-30)   # well-defined if yty > 0
+
+        use_bb1   = (bb_variant == "bb1") | ((bb_variant == "alt") & (it % 2 == 0))
+        alpha_raw = jnp.where(use_bb1, alpha_bb1, alpha_bb2)
+
+        # Valid only if finite and positive
+        def _is_valid(a): return jnp.isfinite(a) & (a > 0.0)
+        alpha_guess = jax.lax.cond(_is_valid(alpha_raw), lambda _: alpha_raw, lambda _: alpha_prev, operand=None)
+
+        # Clamp
+        alpha_guess = jnp.clip(
+            alpha_guess,
+            jnp.asarray(stepsize_min, alpha_guess.dtype),
+            jnp.asarray(stepsize_max, alpha_guess.dtype),
+        )
+        # ---------------------------------------------------------------
+
+        # ======= Early-accept branch: skip LS when near-stationary =======
+        near_factor = 5.0
+        g_norm = jnp.linalg.norm(g_k, ord=jnp.inf)
+        near_stationary = g_norm <= (near_factor * TauF_cuberoot * (1.0 + jnp.abs(f_k)))
+
+        def _accept_without_ls(_):
+            # Trial step with spectral alpha; single evaluation
+            trial_params = params + alpha_guess * descent
+            (trial_value, (aux_flat_new, parts_new)), trial_grad = fun_value_and_grad(trial_params, aux_args[0])
+            new_params = _normalize_u(trial_params)
+            # Return tuple of **exactly the same dtypes/structure** as LS branch
+            return (
+                alpha_guess,                                     # new_stepsize (float)
+                new_params,                                      # new_params (array)
+                trial_value,                                     # new_value (scalar array)
+                trial_grad,                                      # new_grad (array)
+                aux_flat_new,                                    # aux_flat_new (array)
+                parts_new,                                       # parts_new (array)
+                jnp.asarray(0,    dtype=jnp.int32),              # ls_iter_num
+                jnp.asarray(False, dtype=jnp.bool_),             # ls_failed
+            )
+
+        def _do_linesearch(_):
+            new_stepsize, ls_state = ls.run(
+                alpha_guess,
+                params,
+                value=f_k,
+                grad=g_k,
+                descent_direction=descent,
+                fun_args=aux_args,   # (aux_flat,)
+                fun_kwargs={}
+            )
+            new_params = _normalize_u(ls_state.params)
+            new_value  = ls_state.value
+            new_grad   = ls_state.grad
+            aux_flat_new, parts_new = ls_state.aux
+            # Wrap iter/failed into explicit JAX scalars so both branches match
+            ls_iter_num = jnp.asarray(ls_state.iter_num, dtype=jnp.int32)
+            ls_failed   = jnp.asarray(ls_state.failed,   dtype=jnp.bool_)
+            return (
+                new_stepsize, new_params, new_value, new_grad,
+                aux_flat_new, parts_new, ls_iter_num, ls_failed
+            )
+
+        (new_stepsize,
+         new_params,
+         new_value,
+         new_grad,
+         aux_flat_new,
+         parts_new,
+         ls_iter_num,
+         ls_failed) = jax.lax.cond(near_stationary, _accept_without_ls, _do_linesearch, operand=None)
+        # =================================================================
+
+        aux_args_next = (aux_flat_new,)
+
+        # Pick a numeric mode flag (1=early-accept, 0=line-search) to avoid strings in JAX
+        mode_flag = jnp.where(near_stationary, jnp.asarray(1, jnp.int32), jnp.asarray(0, jnp.int32))
+
+        if ls_print or debug:
+            gtd = _tree_vdot(g_k, descent)
+            jax.debug.print(
+                "  [BB mode={}] it {:02d}  α0 {:.3e}  α {:.3e}  failed:{}  g·d {:+.3e}",
+                mode_flag, ls_iter_num, alpha_guess, new_stepsize, ls_failed, gtd
+            )
+
+        return (
+            new_params,           # params
+            new_value,            # f_k
+            new_grad,             # g_k
+            aux_args_next,        # aux_args  (1-tuple)
+            params,               # x_prev
+            g_k,                  # g_prev
+            f_k,                  # f_prev
+            new_stepsize,         # alpha_prev
+            it + 1,               # it
+            parts_new,            # parts_last
+        )
+
+    params_star, f_star, g_star, aux_args_star, _, _, _, step_size, _, parts_last = \
+        jax.lax.while_loop(cond_fun, body_fun, carry0)
+
+    # Compose final aux as (aux_flat, parts_norm) like L-BFGS code expects
+    aux_flat_star = aux_args_star[0]
+    aux_star = (aux_flat_star, parts_last)
+
+    class _State:
+        pass
+    st = _State()
+    st.value = f_star
+    st.grad = g_star
+    st.aux = aux_star
+    st.iter_num = 0
+    st.last_stepsize = step_size
+    return params_star, st
+
+
+# =============================================================================
+# Front-end wrapper: same signature & return shape as minimize_energy_lbfgs
+# =============================================================================
+def minimize_energy_bb(
+    initial_u_raw: jnp.ndarray,
+    initial_A: Optional[jnp.ndarray],
+    A_t, P_t, R_t, Dinv_t, L_c,
+    conn: jnp.ndarray, grad_phi: jnp.ndarray,
+    volume: jnp.ndarray, mat_id: jnp.ndarray,
+    Ms_lookup: jnp.ndarray,
+    A_lookup_exchange: jnp.ndarray,
+    K1_lookup: jnp.ndarray,
+    k_easy_e: jnp.ndarray,
+    H_ext: jnp.ndarray,
+    E_ref: jnp.ndarray,
+    *,
+    # Core A/U-solver tuning:
+    tol: float = 1e-3, maxiter: int = 500,
+    nu_pre: int = 2, nu_post: int = 2, omega: float = 0.7,
+    coarse_iters: int = 8, coarse_omega: float = 0.7,
+    # Mapping:
+    eps_norm: float = 1e-12,
+    # Gauge (A only):
+    gauge: float = 0.0,
+    # Magnetostatics formulation:
+    ms_mode: str = "A",
+    # Outer BB:
+    outer_max_iter: int = 200, grad_tol: float = 1e-3,
+    bb_variant: str = "alt",             # "alt", "bb1", "bb2"
+    debug_bb: bool = False,
+    # Line-search knobs:
+    ls_init_stepsize: float = 1.0,
+    ls_max_stepsize: float = 1.0,
+    ls_print: bool = True,
+    precond_mode: str = "none",
+    diag_u=None,
+    bb2_precond: bool = False,
+):
+    N = initial_u_raw.shape[0]
+    if ms_mode == "A":
+        A0_flat = (jnp.zeros((3 * N,), dtype=jnp.float64)
+                   if initial_A is None else initial_A.reshape((-1,)))
+    else:
+        A0_flat = (jnp.zeros((N,), dtype=jnp.float64)
+                   if initial_A is None else initial_A.reshape((-1,)))
+
+    fun_value_and_grad = make_fun_for_jaxopt(
+        A_t=A_t, P_t=P_t, R_t=R_t, Dinv_t=Dinv_t, L_c=L_c,
+        conn=conn, grad_phi=grad_phi, volume=volume, mat_id=mat_id,
+        Ms_lookup=Ms_lookup, A_lookup_exchange=A_lookup_exchange,
+        K1_lookup=K1_lookup, k_easy_e=k_easy_e,
+        H_ext=H_ext, E_ref=E_ref,
+        tol=tol, maxiter=maxiter, nu_pre=nu_pre, nu_post=nu_post, omega=omega,
+        coarse_iters=coarse_iters, coarse_omega=coarse_omega,
+        gauge=gauge,
+        ms_mode=ms_mode,
+        eps_norm=eps_norm,
+    )
+
+    u_star, state = run_bb_gradient(
+        initial_u_raw, A0_flat,
+        fun_value_and_grad=fun_value_and_grad,
+        max_iter=outer_max_iter, grad_tol=grad_tol,
+        bb_variant=bb_variant,
+        stepsize_init=ls_init_stepsize,
+        stepsize_max=ls_max_stepsize,
+        stepsize_min=1e-16,
+        ls_print=ls_print,
+        debug=debug_bb,
+        precond_mode=precond_mode,
+        diag_u=diag_u,
+        bb2_precond=bb2_precond,
+    )
+
+    E_norm = state.value
+    aux_flat, parts_norm = state.aux  # <- already a (aux_flat, parts_norm) tuple now
+    if ms_mode == "A":
+        A_or_U = aux_flat.reshape((-1, 3))
+    else:
+        A_or_U = aux_flat.reshape((-1,))
+    return E_norm, u_star, A_or_U, parts_norm, state.last_stepsize
+
+
+minimize_energy_bb = jax.jit(
+    minimize_energy_bb,
+    static_argnames=(
+        "tol", "maxiter", "nu_pre", "nu_post", "omega", "coarse_iters", "coarse_omega",
+        "eps_norm",
+        "outer_max_iter", "grad_tol",
+        "debug_bb",
+        "bb_variant",
+        "ls_init_stepsize", "ls_max_stepsize", "ls_print",
+        "ms_mode",
+        "precond_mode",     # <-- STRING, must be static
+        "bb2_precond",      # <-- PY bool, must be static
+    ),
+)
+
 
 # =============================================================================
 # Helper: uniform u_raw init (from InitialState mx,my,mz)

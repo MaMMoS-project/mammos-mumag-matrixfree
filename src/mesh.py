@@ -413,7 +413,87 @@ def build_ellipse_polygon(a: float = 1.0, b: float = 0.5, n: int = 128) -> np.nd
     polygon = np.column_stack((x, y))
     return polygon
 
+def mesh_backend_meshpy_elliptic_cylinder(
+    a: float,          # semi-axis along local x
+    b: float,          # semi-axis along local y
+    t: float,          # thickness along local z
+    ex: np.ndarray,
+    ey: np.ndarray,
+    ez: np.ndarray,
+    h: float,
+    minratio: float,
+    verbose: bool,
+):
+    """
+    Mesh an elliptic cylinder (ellipse cross-section with semi-axes a, b; extruded by thickness t)
+    using MeshPy/TetGen, without pre-triangulating the caps. The top and bottom faces are single
+    N-gon facets; the side surface is N quads.
+    """
+    if not HAVE_meshpy:
+        raise RuntimeError("meshpy is not installed. Install with: pip install meshpy")
 
+    # 1) Build boundary polygon (LOCAL XY) approximating the ellipse (CCW)
+    polygon = build_ellipse_polygon(a=a, b=b, n=128)  # shape (N, 2)
+
+    # 2) Build 3D vertices in LOCAL coords, then map to WORLD
+    top_z, bottom_z = t / 2.0, -t / 2.0
+    verts_top    = np.hstack([polygon, np.full((polygon.shape[0], 1), top_z)])
+    verts_bottom = np.hstack([polygon, np.full((polygon.shape[0], 1), bottom_z)])
+    V_local = np.vstack([verts_top, verts_bottom])
+
+    V_world = np.ascontiguousarray(
+        V_local[:, 0:1] * ex[None, :]
+        + V_local[:, 1:2] * ey[None, :]
+        + V_local[:, 2:3] * ez[None, :],
+        dtype=np.float64,
+    )
+
+    # 3) Facets: top N-gon (CCW), bottom N-gon (reversed), side quads
+    facets: list[list[int]] = []
+    N = polygon.shape[0]
+
+    # Top N-gon
+    facets.append(list(range(0, N)))
+
+    # Bottom N-gon (reverse)
+    facets.append(list(range(2 * N - 1, N - 1, -1)))
+
+    # Side quads
+    for i in range(N):
+        ni = (i + 1) % N
+        aidx = i
+        bidx = ni
+        cidx = N + ni
+        didx = N + i
+        facets.append([aidx, bidx, cidx, didx])
+
+    # 4) TetGen via MeshPy
+    mi = MeshInfo()
+    mi.set_points(V_world.tolist())
+    mi.set_facets(facets)  # polygons & quads
+
+    mi.regions.resize(1)
+    mi.regions[0] = (0.0, 0.0, 0.0, 1.0, approx_max_volume_from_edge(float(h)))
+
+    opts = Options("pqAa")
+    opts.minratio = float(minratio)
+    opts.regionattrib = True
+    opts.verbose = bool(verbose)
+
+    mesh = tet_build(
+        mi,
+        options=opts,
+        attributes=True,
+        volume_constraints=True,
+        verbose=bool(verbose),
+    )
+
+    knt = np.asarray(mesh.points, dtype=np.float64)
+    tets = np.asarray(mesh.elements, dtype=np.int32)
+    ijk = np.hstack([tets, np.ones((tets.shape[0], 1), dtype=np.int32)])
+
+
+'''
 def mesh_backend_meshpy_elliptic_cylinder(
     a: float,
     b: float,
@@ -480,7 +560,7 @@ def mesh_backend_meshpy_elliptic_cylinder(
     tets = np.asarray(mesh.elements, dtype=np.int32)
     ijk = np.hstack([tets, np.ones((tets.shape[0], 1), dtype=np.int32)])
     return knt, ijk
-
+'''
 
 def mesh_backend_grid_elliptic_cylinder(
     a: float,
@@ -565,6 +645,94 @@ def mesh_backend_grid_elliptic_cylinder(
 # Mesh backends for eye geometry
 def mesh_backend_meshpy_eye(
     length: float,
+    width: float,     # NOTE: this is the half-height (i.e., Ly/2)
+    t: float,
+    ex: np.ndarray,
+    ey: np.ndarray,
+    ez: np.ndarray,
+    h: float,
+    minratio: float,
+    verbose: bool,
+):
+    """
+    Mesh the extruded 'eye' shape (built from two quadratic Bézier arcs) using MeshPy/TetGen,
+    without pre-triangulating the caps. The top and bottom faces are passed as single N-gon facets;
+    the side surface is passed as quads between successive boundary vertices.
+    """
+    if not HAVE_meshpy:
+        raise RuntimeError("meshpy is not installed. Install with: pip install meshpy")
+
+    # 1) Build boundary polygon (LOCAL XY). build_eye_polygon returns CCW points
+    polygon = build_eye_polygon(length=length, width=width)  # shape (N, 2)
+
+    # 2) Build 3D vertices for top and bottom in LOCAL coords, then map to WORLD
+    top_z, bottom_z = t / 2.0, -t / 2.0
+    verts_top    = np.hstack([polygon, np.full((polygon.shape[0], 1), top_z)])
+    verts_bottom = np.hstack([polygon, np.full((polygon.shape[0], 1), bottom_z)])
+    V_local = np.vstack([verts_top, verts_bottom])
+
+    # Map LOCAL -> WORLD using orthonormal frame (ex, ey, ez)
+    V_world = np.ascontiguousarray(
+        V_local[:, 0:1] * ex[None, :]
+        + V_local[:, 1:2] * ey[None, :]
+        + V_local[:, 2:3] * ez[None, :],
+        dtype=np.float64,
+    )
+
+    # 3) Build facets:
+    #    - Top: one N-gon (0..N-1), keep CCW order for outward normal
+    #    - Bottom: one N-gon (N..2N-1), use reversed order to maintain outward normal
+    #    - Sides: N quads (a,b,c,d) wrapping around the ring
+    facets: list[list[int]] = []
+    N = polygon.shape[0]
+
+    # Top N-gon
+    facets.append(list(range(0, N)))
+
+    # Bottom N-gon (reverse)
+    facets.append(list(range(2 * N - 1, N - 1, -1)))
+
+    # Side quads
+    for i in range(N):
+        ni = (i + 1) % N
+        a = i
+        b = ni
+        c = N + ni
+        d = N + i
+        facets.append([a, b, c, d])
+
+    # 4) TetGen via MeshPy
+    mi = MeshInfo()
+    mi.set_points(V_world.tolist())
+    mi.set_facets(facets)  # polygons & quads; TetGen will triangulate them
+
+    # Region with volume constraint derived from h
+    mi.regions.resize(1)
+    mi.regions[0] = (0.0, 0.0, 0.0, 1.0, approx_max_volume_from_edge(float(h)))
+
+    # TetGen options
+    opts = Options("pqAa")
+    opts.minratio = float(minratio)
+    opts.regionattrib = True
+    opts.verbose = bool(verbose)
+
+    mesh = tet_build(
+        mi,
+        options=opts,
+        attributes=True,
+        volume_constraints=True,
+        verbose=bool(verbose),
+    )
+
+    # Return nodes and tets with mat_id=1
+    knt = np.asarray(mesh.points, dtype=np.float64)
+    tets = np.asarray(mesh.elements, dtype=np.int32)
+    ijk = np.hstack([tets, np.ones((tets.shape[0], 1), dtype=np.int32)])
+    return knt, ijk
+
+'''
+def mesh_backend_meshpy_eye(
+    length: float,
     width: float,
     t: float,
     ex: np.ndarray,
@@ -633,7 +801,7 @@ def mesh_backend_meshpy_eye(
     tets = np.asarray(mesh.elements, dtype=np.int32)
     ijk = np.hstack([tets, np.ones((tets.shape[0], 1), dtype=np.int32)])
     return knt, ijk
-
+'''
 
 def mesh_backend_grid_eye(
     length: float,
@@ -967,7 +1135,6 @@ def run_single_solid_mesher(
     h: float = 2.0,
     minratio: float = 1.4,  # meshpy backend only
     backend: str = "meshpy",  # "meshpy" | "grid"
-    force_grid: bool = False,  # when True, honor grid even if meshpy is available
     dir_x: Union[str, Tuple[float, float, float]] = "1,0,0",
     dir_y: Union[str, Tuple[float, float, float]] = "0,1,0",
     dir_z: Union[str, Tuple[float, float, float]] = "0,0,1",  # ellipsoid symmetry axis
@@ -1024,16 +1191,6 @@ def run_single_solid_mesher(
         raise ValueError("backend must be 'meshpy' or 'grid'")
     # Prefer meshpy when it is available, unless the caller set force_grid=True
     effective_backend = backend
-    if HAVE_meshpy and not force_grid:
-        if backend == "grid":
-            if verbose:
-                print(
-                    "[info] meshpy available — using 'meshpy' backend instead of requested 'grid'",
-                    flush=True,
-                )
-            effective_backend = "meshpy"
-        else:
-            effective_backend = "meshpy"
 
     if geom == "box":
         if backend == "meshpy":
@@ -1047,24 +1204,12 @@ def run_single_solid_mesher(
                 verbose=bool(verbose),
             )
         else:
-            # Use effective_backend (may have been promoted to meshpy)
-            if effective_backend == "meshpy":
-                knt, ijk = mesh_backend_meshpy_box(
-                    (Lx, Ly, Lz),
-                    ex,
-                    ey,
-                    ez,
-                    h=float(h),
-                    minratio=float(minratio),
-                    verbose=bool(verbose),
-                )
-            else:
                 knt, ijk = mesh_backend_grid_box(
                     (Lx, Ly, Lz), ex, ey, ez, h=float(h), verbose=bool(verbose)
                 )
     elif geom == "ellipsoid":
         # Ellipsoid (now oriented using ex,ey,ez)
-        if effective_backend == "meshpy":
+        if backend == "meshpy":
             n_subdiv = parse_ell_subdiv_option(
                 ell_subdiv, Lx, Ly, Lz, float(h), kappa=1.0
             )
@@ -1086,18 +1231,6 @@ def run_single_solid_mesher(
                 verbose=bool(verbose),
             )
         else:
-            if effective_backend == "meshpy":
-                knt, ijk = mesh_backend_meshpy_ellipsoid(
-                    (Lx, Ly, Lz),
-                    h=float(h),
-                    minratio=float(minratio),
-                    subdiv=int(n_subdiv),
-                    ex=ex,
-                    ey=ey,
-                    ez=ez,
-                    verbose=bool(verbose),
-                )
-            else:
                 knt, ijk = mesh_backend_grid_ellipsoid(
                     (Lx, Ly, Lz), h=float(h), ex=ex, ey=ey, ez=ez, verbose=bool(verbose)
                 )
@@ -1106,7 +1239,7 @@ def run_single_solid_mesher(
         length = float(Lx)
         width_half = float(Ly) / 2.0
         thickness = float(Lz)
-        if effective_backend == "meshpy":
+        if backend == "meshpy":
             knt, ijk = mesh_backend_meshpy_eye(
                 length=length,
                 width=width_half,
@@ -1134,7 +1267,7 @@ def run_single_solid_mesher(
         a = float(Lx) / 2.0
         b = float(Ly) / 2.0
         thickness = float(Lz)
-        if effective_backend == "meshpy":
+        if backend == "meshpy":
             knt, ijk = mesh_backend_meshpy_elliptic_cylinder(
                 a=a,
                 b=b,
@@ -1252,11 +1385,11 @@ def main():
         "non-negative integer or 'auto'/'automatic'/'-1'.",
     )
 
-    ap.add_argument(
-        "--force-grid",
-        action="store_true",
-        help="Force use of the grid backend even if meshpy is installed.",
-    )
+    # ap.add_argument(
+    #     "--force-grid",
+    #     action="store_true",
+    #     help="Force use of the grid backend even if meshpy is installed.",
+    # )
 
     # Output naming
     ap.add_argument(
@@ -1293,7 +1426,6 @@ def main():
             h=float(args.h),
             minratio=float(args.minratio),
             backend=args.backend,
-            force_grid=bool(args.force_grid),
             dir_x=args.dir_x,
             dir_y=args.dir_y,
             dir_z=args.dir_z,
