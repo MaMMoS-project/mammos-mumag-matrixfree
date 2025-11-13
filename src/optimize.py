@@ -192,7 +192,7 @@ def _u_raw_to_m_and_grad_u(
     r_safe = jnp.maximum(r, jnp.asarray(eps_norm, u_raw.dtype))
     m_nodes = u_raw / r_safe[:, None]
     gm_dot_m = jnp.sum(grad_m_norm * m_nodes, axis=1, keepdims=True)
-    grad_u_raw = (grad_m_norm - gm_dot_m * m_nodes) / r_safe[:, None]
+    grad_u_raw = (grad_m_norm - gm_dot_m * m_nodes) #/ r_safe[:, None]
     return m_nodes, grad_u_raw
 
 def _normalize_u(params: jnp.ndarray, eps: float = 1e-12) -> jnp.ndarray:
@@ -423,7 +423,6 @@ def run_jaxopt_lbfgs_twoloop(
     ls_init_stepsize: float = 1.0,
     ls_max_stepsize: float = 1.0,
     ls_increase_factor: float = 1.5,
-    ls_print: bool = True,
     debug: bool = False,
     ls_kind: str = "default",  
     ls_c1: float = 1e-4,
@@ -483,30 +482,22 @@ def run_jaxopt_lbfgs_twoloop(
         step_ok = jax.lax.cond(it > 0, lambda _: step_norm <= (TauF_sqrt * (1.0 + x_norm)), lambda _: False, operand=None)
         grad_ok = g_norm <= (TauF_cuberoot * (1.0 + jnp.abs(f_k)))
         grad_abs_ok = g_norm < eps_A
+
+        '''
+        if debug:
+            jax.debug.print(
+                "[LBFGS it:{:03d}] f {:+.9e}  |g|_inf {:.3e}  Δx_inf {:.3e}  U:{} {} {} {}",
+                it, f_k, g_norm, step_norm,
+                fun_ok.astype(jnp.int32), step_ok.astype(jnp.int32),
+                grad_ok.astype(jnp.int32), grad_abs_ok.astype(jnp.int32)
+            )
+        '''
+
         success = (fun_ok & step_ok & grad_ok) | grad_abs_ok
         return jnp.logical_and(~success, it < max_iter)
 
     def body_fun(carry):
         params, state, x_prev, f_prev = carry
-
-        # Select initial stepsize
-        if ls_init_mode == "value" and (ls_init_stepsize is not None):
-            init_stepsize = jnp.asarray(ls_init_stepsize, dtype=params.dtype)
-        elif ls_init_mode == "current":
-            init_stepsize = state.stepsize
-        elif ls_init_mode == "increase":
-            is_first = (state.iter_num == 0)
-            base = jax.lax.cond(is_first,
-                                lambda _: jnp.asarray(ls_init_stepsize, dtype=params.dtype),
-                                lambda _: state.stepsize,
-                                operand=None)
-            init_stepsize = jax.lax.cond(is_first,
-                                         lambda _: jnp.minimum(base, solver.max_stepsize),
-                                         lambda _: jnp.minimum(base * jnp.asarray(ls_increase_factor, base.dtype),
-                                                               solver.max_stepsize),
-                                         operand=None)
-        else:
-            init_stepsize = solver.max_stepsize
 
         # Build H0 operator
         if H0_mode == "gamma":
@@ -544,19 +535,86 @@ def run_jaxopt_lbfgs_twoloop(
                                lambda _: jtu.tree_map(lambda g: -g, state.grad),
                                operand=None)
 
+        # IMPORTANT: recompute g·d for the final direction
+        gtd = _tree_vdot(state.grad, descent)  # phi'(0)
+
+        def _increase_mode_init():
+            is_first = (state.iter_num == 0)
+            base = jax.lax.cond(
+                is_first,
+                lambda _: jnp.asarray(ls_init_stepsize, dtype=params.dtype),
+                lambda _: state.stepsize,
+                operand=None)
+            return jax.lax.cond(
+                is_first,
+                lambda _: jnp.minimum(base, solver.max_stepsize),
+                lambda _: jnp.minimum(base * jnp.asarray(ls_increase_factor, base.dtype),
+                                      solver.max_stepsize),
+                operand=None)
+
+        # -----------------------
+        # Select initial stepsize
+        # -----------------------
+        if ls_init_mode == "value" and (ls_init_stepsize is not None):
+            init_stepsize = jnp.asarray(ls_init_stepsize, dtype=params.dtype)
+        
+        elif ls_init_mode == "current":
+            init_stepsize = state.stepsize
+        
+        elif ls_init_mode == "alpha0":
+            # Quadratic initializer:
+            #   alpha0 = min(1, 1.01 * 2*(f_k - f_{k-1}) / (g_k^T p_k))
+            # Use "increase" fallback on first iter or invalid ratio.
+            base = _increase_mode_init()                 # fallback
+            num = 2.0 * (state.value - f_prev)           # <= 0 when f_k <= f_{k-1}
+            den = gtd                                    # <= 0 for descent
+            # Avoid division by zero; pick a negative placeholder to keep raw invalid if den == 0
+            raw = num / jnp.where(den != 0.0, den, jnp.asarray(-1.0, den.dtype))
+            # raw is valid iff finite and > 0
+            valid = jnp.isfinite(raw) & (raw > 0.0)
+            # Nocedal–Wright tweak: min(1, 1.01*raw), then clamp to [1e-16, max_stepsize]
+            cand = jnp.minimum(jnp.asarray(1.0, raw.dtype), 1.01 * raw)
+            cand = jnp.clip(cand,
+                            jnp.asarray(1e-16, cand.dtype),
+                            jnp.asarray(solver.max_stepsize, cand.dtype))
+            init_stepsize = jax.lax.select(valid, cand, base)
+
+        elif ls_init_mode == "increase":
+            init_stepsize = _increase_mode_init()
+        
+        else:
+            # Safe default
+            init_stepsize = jnp.asarray(solver.max_stepsize, dtype=params.dtype)
+
         # Line search
         new_stepsize, ls_state = solver.run_ls(init_stepsize, params,
                                                value=state.value, grad=state.grad,
                                                descent_direction=descent,
                                                fun_args=(state.aux,), fun_kwargs={})
+
+        # -- in run_jaxopt_lbfgs_twoloop(...).body_fun --
+
+        # 1) normalize param we’ll keep
         new_params = _normalize_u(ls_state.params)
         new_value = ls_state.value
         new_grad = ls_state.grad
         new_aux = ls_state.aux
+        
+        # 2) RE-EVALUATE value+grad at the normalized point, warm-starting with aux from LS
+        # aux_warm = ls_state.aux[0]  # flat A/U field
+        # (new_value, (aux_flat_new, parts_new)), new_grad = fun_value_and_grad(
+        #    new_params, aux_warm
+        #)
+        # new_aux = (aux_flat_new, parts_new)
+
+        # 3) (optional but recommended) project y onto the new tangent (cheap Riemannian fix)
+        s = jtu.tree_map(lambda a, b: a - b, new_params, params)
+        y_raw = jtu.tree_map(lambda a, b: a - b, new_grad, state.grad)
+        y = y_raw - jnp.sum(y_raw * new_params, axis=1, keepdims=True) * new_params
 
         # Powell damping for curvature
-        s = jtu.tree_map(lambda a, b: a - b, new_params, params)
-        y = jtu.tree_map(lambda a, b: a - b, new_grad, state.grad)
+        # s = jtu.tree_map(lambda a, b: a - b, new_params, params)
+        # y = jtu.tree_map(lambda a, b: a - b, new_grad, state.grad)
         delta = jnp.asarray(damping_delta, dtype=new_params.dtype)
         sTs = _tree_vdot(s, s)
         gamma_safe = jnp.maximum(state.gamma, jnp.asarray(1e-30, state.gamma.dtype))
@@ -570,12 +628,17 @@ def run_jaxopt_lbfgs_twoloop(
         sTy_used = _tree_vdot(s, y_used)
         rho = jnp.where(sTy_used > 0.0, 1.0 / sTy_used, 0.0)
 
-        # Update histories (skip if curvature still bad)
+        # Prepare defaults for the no-history path
         s_hist = state.s_history
         y_hist = state.y_history
         rho_hist = state.rho_history
-        if solver.history_size:
-            start = state.iter_num % solver.history_size
+        
+        gamma_new = state.gamma
+        write_mask = jnp.asarray(False, dtype=jnp.bool_)  # define for debug/state
+        
+        hist = solver.history_size  # Python int, static for JIT
+        if hist:
+            start = state.iter_num % hist
             write_mask = (sTy_used > 0.0)
             s_prev_slot = jtu.tree_map(lambda H: H[start], s_hist)
             y_prev_slot = jtu.tree_map(lambda H: H[start], y_hist)
@@ -586,10 +649,12 @@ def run_jaxopt_lbfgs_twoloop(
             s_hist = jtu.tree_map(lambda H, v: H.at[start].set(v), s_hist, s_to_write)
             y_hist = jtu.tree_map(lambda H, v: H.at[start].set(v), y_hist, y_to_write)
             rho_hist = rho_hist.at[start].set(rho_to_write)
+            # Only compute gamma when history exists
+            gamma_new = jax.lax.select(write_mask,
+                                       _compute_gamma_scalar(s_hist, y_hist, start),
+                                       state.gamma)
 
-        gamma_new = jax.lax.select(write_mask, _compute_gamma_scalar(s_hist, y_hist, start), state.gamma)
-
-        if ls_print or debug:
+        if debug:
             jax.debug.print("{:04d} f {:.6e} it {:02d} α0 {:.3e} α {:.3e} {} g·d {:+.3e} γ: {:.3e}",
                             state.iter_num, new_value,ls_state.iter_num, init_stepsize, new_stepsize,
                             ls_state.failed, gtd, gamma_new)
@@ -614,7 +679,8 @@ def run_jaxopt_lbfgs_twoloop(
         return new_params, new_state, params, state.value
 
     params_star, state_star, _, _ = jax.lax.while_loop(cond_fun, body_fun, carry0)
-    return params_star, state_star
+    metrics = jnp.asarray([state_star.iter_num, state_star.num_fun_eval], dtype=jnp.int32)
+    return params_star, state_star, metrics
 
 
 # =============================================================================
@@ -653,7 +719,6 @@ def minimize_energy_lbfgs(
     ls_init_stepsize: float = 1.0,
     ls_max_stepsize: float = 1.0,
     ls_increase_factor: float = 1.5,
-    ls_print: bool = True,
     ls_kind: str = "default",
     ls_c1: float = 1e-4,
     ls_c2: float = 0.9,
@@ -682,13 +747,13 @@ def minimize_energy_lbfgs(
         eps_norm=eps_norm,
     )
 
-    u_star, state = run_jaxopt_lbfgs_twoloop(
+    u_star, state, metrics = run_jaxopt_lbfgs_twoloop(
         initial_u_raw, A0_flat,
         fun_value_and_grad=fun_value_and_grad,
         history_size=history_size, max_iter=outer_max_iter, grad_tol=grad_tol,
         H0_mode=H0_mode,
         ls_init_mode=ls_init_mode, ls_init_stepsize=ls_init_stepsize,
-        ls_max_stepsize=ls_max_stepsize, ls_increase_factor=ls_increase_factor, ls_print=ls_print,
+        ls_max_stepsize=ls_max_stepsize, ls_increase_factor=ls_increase_factor, 
         debug=debug_lbfgs,
         ls_kind=ls_kind,
         ls_c1=ls_c1, ls_c2=ls_c2, ls_decrease=ls_decrease,
@@ -704,20 +769,27 @@ def minimize_energy_lbfgs(
         A_or_U = aux_flat.reshape((-1, 3))
     else:
         A_or_U = aux_flat.reshape((-1,))
-    return E_norm, u_star, A_or_U, parts_norm
+    return E_norm, u_star, A_or_U, parts_norm, state.stepsize, metrics
+
 
 
 minimize_energy_lbfgs = jax.jit(
     minimize_energy_lbfgs,
     static_argnames=(
-        "tol", "maxiter", "nu_pre", "nu_post", "omega", "coarse_iters", "coarse_omega",
+        "tol","maxiter","nu_pre","nu_post","omega","coarse_iters","coarse_omega",
         "eps_norm",
-        "history_size", "outer_max_iter", "grad_tol",
+        "history_size","outer_max_iter","grad_tol",
         "debug_lbfgs",
         "H0_mode",
-        "ls_init_mode", "ls_init_stepsize", "ls_max_stepsize", "ls_print", "ls_increase_factor",
-        "ms_mode",
-        "ls_kind",
+        "ls_init_mode",      # mode -> static
+        "ls_max_stepsize",   # constructor knob -> static
+        "ls_kind",           # constructor knob -> static
+        "ls_c1",             # constructor knob if BacktrackingLineSearch is used -> static
+        "ls_c2",             # constructor knob -> static
+        "ls_decrease",       # constructor knob -> static
+        "ms_mode",           # mode -> static
+        # NOTE: ls_init_stepsize intentionally NOT static (dynamic per field)
+        # ls_increase_factor can be left dynamic as long as you don't put it in a constructor
     ),
 )
 
@@ -736,7 +808,6 @@ def run_bb_gradient(
     stepsize_init: float = 1.0,
     stepsize_max: float = 1.0,
     stepsize_min: float = 1e-16,
-    ls_print: bool = True,
     debug: bool = False,
     # --- NEW: preconditioning ---
     precond_mode: str = "none",      # "none" | "diag" | "block_jacobi"
@@ -785,11 +856,12 @@ def run_bb_gradient(
     alpha_prev = jnp.asarray(stepsize_init, dtype=params0.dtype)
     it0 = jnp.asarray(0, jnp.int32)
 
-    # Carry: (params, f_k, g_k, aux_args, x_prev, g_prev, f_prev, alpha_prev, it, parts_last)
-    carry0 = (params0, f0, g0, aux_args0, x_prev, g_prev, f_prev, alpha_prev, it0, parts0)
+    fe_total0 = jnp.asarray(1, jnp.int32)
+    # Carry: (params, f_k, g_k, aux_args, x_prev, g_prev, f_prev, alpha_prev, it, parts_last, fe_total)
+    carry0 = (params0, f0, g0, aux_args0, x_prev, g_prev, f_prev, alpha_prev, it0, parts0, fe_total0)
 
     def cond_fun(carry):
-        params, f_k, g_k, aux_args, x_prev, g_prev, f_prev, alpha_prev, it, parts_last = carry
+        params, f_k, g_k, aux_args, x_prev, g_prev, f_prev, alpha_prev, it, parts_last, fe_total = carry
         x_norm   = jnp.linalg.norm(params, ord=jnp.inf)
         g_norm   = jnp.linalg.norm(g_k, ord=jnp.inf)
         step_norm= jnp.linalg.norm(params - x_prev, ord=jnp.inf)
@@ -814,7 +886,7 @@ def run_bb_gradient(
         return jnp.logical_and(~success, it < max_iter)
 
     def body_fun(carry):
-        params, f_k, g_k, aux_args, x_prev, g_prev, f_prev, alpha_prev, it, parts_last = carry
+        params, f_k, g_k, aux_args, x_prev, g_prev, f_prev, alpha_prev, it, parts_last, fe_total = carry
 
         # Preconditioned tangent descent: d = - P * g
         Pg = _apply_precond_tangent(params, g_k, precond_mode=precond_mode, diag_u=diag_u)
@@ -863,6 +935,7 @@ def run_bb_gradient(
             (trial_value, (aux_flat_new, parts_new)), trial_grad = fun_value_and_grad(trial_params, aux_args[0])
             new_params = _normalize_u(trial_params)
             # Return tuple of **exactly the same dtypes/structure** as LS branch
+            fe_incr = jnp.asarray(1, jnp.int32)
             return (
                 alpha_guess,                                     # new_stepsize (float)
                 new_params,                                      # new_params (array)
@@ -872,6 +945,7 @@ def run_bb_gradient(
                 parts_new,                                       # parts_new (array)
                 jnp.asarray(0,    dtype=jnp.int32),              # ls_iter_num
                 jnp.asarray(False, dtype=jnp.bool_),             # ls_failed
+                fe_incr,
             )
 
         def _do_linesearch(_):
@@ -891,9 +965,10 @@ def run_bb_gradient(
             # Wrap iter/failed into explicit JAX scalars so both branches match
             ls_iter_num = jnp.asarray(ls_state.iter_num, dtype=jnp.int32)
             ls_failed   = jnp.asarray(ls_state.failed,   dtype=jnp.bool_)
+            fe_incr = jnp.asarray(ls_state.num_fun_eval, dtype=jnp.int32)
             return (
                 new_stepsize, new_params, new_value, new_grad,
-                aux_flat_new, parts_new, ls_iter_num, ls_failed
+                aux_flat_new, parts_new, ls_iter_num, ls_failed, fe_incr
             )
 
         (new_stepsize,
@@ -903,7 +978,8 @@ def run_bb_gradient(
          aux_flat_new,
          parts_new,
          ls_iter_num,
-         ls_failed) = jax.lax.cond(near_stationary, _accept_without_ls, _do_linesearch, operand=None)
+         ls_failed,
+         fe_incr) = jax.lax.cond(near_stationary, _accept_without_ls, _do_linesearch, operand=None)
         # =================================================================
 
         aux_args_next = (aux_flat_new,)
@@ -911,13 +987,14 @@ def run_bb_gradient(
         # Pick a numeric mode flag (1=early-accept, 0=line-search) to avoid strings in JAX
         mode_flag = jnp.where(near_stationary, jnp.asarray(1, jnp.int32), jnp.asarray(0, jnp.int32))
 
-        if ls_print or debug:
+        if debug:
             gtd = _tree_vdot(g_k, descent)
             jax.debug.print(
                 "  [BB mode={}] it {:02d}  α0 {:.3e}  α {:.3e}  failed:{}  g·d {:+.3e}",
                 mode_flag, ls_iter_num, alpha_guess, new_stepsize, ls_failed, gtd
             )
 
+        fe_total_next = fe_total + fe_incr
         return (
             new_params,           # params
             new_value,            # f_k
@@ -929,9 +1006,10 @@ def run_bb_gradient(
             new_stepsize,         # alpha_prev
             it + 1,               # it
             parts_new,            # parts_last
+            fe_total_next
         )
 
-    params_star, f_star, g_star, aux_args_star, _, _, _, step_size, _, parts_last = \
+    params_star, f_star, g_star, aux_args_star, _, _, _, step_size, it_star, parts_last, fe_total_star = \
         jax.lax.while_loop(cond_fun, body_fun, carry0)
 
     # Compose final aux as (aux_flat, parts_norm) like L-BFGS code expects
@@ -946,7 +1024,8 @@ def run_bb_gradient(
     st.aux = aux_star
     st.iter_num = 0
     st.last_stepsize = step_size
-    return params_star, st
+    metrics = jnp.asarray([it_star, fe_total_star], dtype=jnp.int32)
+    return params_star, st, metrics
 
 
 # =============================================================================
@@ -982,7 +1061,6 @@ def minimize_energy_bb(
     # Line-search knobs:
     ls_init_stepsize: float = 1.0,
     ls_max_stepsize: float = 1.0,
-    ls_print: bool = True,
     precond_mode: str = "none",
     diag_u=None,
     bb2_precond: bool = False,
@@ -1008,7 +1086,7 @@ def minimize_energy_bb(
         eps_norm=eps_norm,
     )
 
-    u_star, state = run_bb_gradient(
+    u_star, state, metrics = run_bb_gradient(
         initial_u_raw, A0_flat,
         fun_value_and_grad=fun_value_and_grad,
         max_iter=outer_max_iter, grad_tol=grad_tol,
@@ -1016,7 +1094,6 @@ def minimize_energy_bb(
         stepsize_init=ls_init_stepsize,
         stepsize_max=ls_max_stepsize,
         stepsize_min=1e-16,
-        ls_print=ls_print,
         debug=debug_bb,
         precond_mode=precond_mode,
         diag_u=diag_u,
@@ -1029,7 +1106,7 @@ def minimize_energy_bb(
         A_or_U = aux_flat.reshape((-1, 3))
     else:
         A_or_U = aux_flat.reshape((-1,))
-    return E_norm, u_star, A_or_U, parts_norm, state.last_stepsize
+    return E_norm, u_star, A_or_U, parts_norm, state.last_stepsize, metrics
 
 
 minimize_energy_bb = jax.jit(
@@ -1038,15 +1115,16 @@ minimize_energy_bb = jax.jit(
         "tol", "maxiter", "nu_pre", "nu_post", "omega", "coarse_iters", "coarse_omega",
         "eps_norm",
         "outer_max_iter", "grad_tol",
-        "debug_bb",
-        "bb_variant",
-        "ls_init_stepsize", "ls_max_stepsize", "ls_print",
-        "ms_mode",
-        "precond_mode",     # <-- STRING, must be static
-        "bb2_precond",      # <-- PY bool, must be static
+        "debug_bb",       # you can keep this static; toggling it would retrace
+        "bb_variant",     # control-flow/mode -> static
+        "ms_mode",        # control-flow/mode -> static
+        "precond_mode",   # control-flow/mode -> static
+        "bb2_precond",    # bool affecting control flow -> static
+        # NOTE: ls_init_stepsize is intentionally dynamic
+        # NOTE: ls_max_stepsize can be dynamic; it is used only for clamping
+        # NOTE: ls_print can be left out; see note below
     ),
 )
-
 
 # =============================================================================
 # Helper: uniform u_raw init (from InitialState mx,my,mz)

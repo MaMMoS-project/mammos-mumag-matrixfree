@@ -8,6 +8,7 @@ import re
 import jax
 import jax.numpy as jnp
 import sys
+import time
 from magnetostatics import (
     prepare_shells_and_geom,
     p2_path_for_mesh,
@@ -787,6 +788,7 @@ def step7_demag_sweep(
     # LS
     ls_init="current",
     ls_init_stepsize=1.0,
+    ls_pass_init=False,
     ls_max_stepsize=1.0,
     ls_increase_factor=2.0,
     ls_kind='default',
@@ -798,12 +800,18 @@ def step7_demag_sweep(
     bb_variant='bb2',
     bb2_precond=True,
 ):
+
+    t0 = time.perf_counter()
+    total_fun_evals = 0
+    total_outer_iters = 0
+    method_used = solver
+
     N = int(knt.shape[0])
     field = p2cfg.field
     h_dir_unit = jnp.asarray([field.hx, field.hy, field.hz], dtype=jnp.float64)
     E_ref = jnp.asarray(energies0.E_classical, dtype=jnp.float64)
 
-    bb_alpha_prev = ls_init_stepsize
+    alpha_prev = ls_init_stepsize
 
     # Diagonal / block-Jacobi seeds use CLI damping
     if h0_mode == "diag":
@@ -859,6 +867,18 @@ def step7_demag_sweep(
     h_vals = _h_schedule(field.hstart, field.hfinal, field.hstep)
     dat_path = f"{basename}.dat"
     vtu_index = 0
+    # If we resume from a numbered state, continue VTU numbering from there.
+    # (We increment before writing, so starting from the resume index will produce
+    # resume_index + 1 for the next output.)
+    resume_index = None
+    if resume_state_path:
+        _m = _re.search(r"\.(\d{4})\.state\.npz$", str(resume_state_path))
+        if _m:
+            try:
+                resume_index = int(_m.group(1))
+                vtu_index = resume_index
+            except Exception:
+                pass
     last_MH_mu0 = None
 
     # header for output
@@ -882,7 +902,7 @@ def step7_demag_sweep(
         )
 
         if solver=='lbfgs':
-            E_norm, u_star, aux_star, parts_norm = minimize_energy_lbfgs(
+            E_norm, u_star, aux_star, parts_norm, alpha_out, metrics = minimize_energy_lbfgs(
                 initial_u_raw=u_raw,
                 initial_A=aux_prev,
                 A_t=amg.A_t,
@@ -916,10 +936,9 @@ def step7_demag_sweep(
                 debug_lbfgs=debug_lbfgs,
                 H0_mode=h0_mode,
                 ls_init_mode=ls_init,
-                ls_init_stepsize=ls_init_stepsize,
+                ls_init_stepsize=alpha_prev,
                 ls_max_stepsize=ls_max_stepsize,
                 ls_increase_factor=ls_increase_factor,
-                ls_print=debug_lbfgs,
                 ls_kind=ls_kind,
                 ls_c1=ls_c1,
                 ls_c2=ls_c2,
@@ -928,7 +947,7 @@ def step7_demag_sweep(
                 diag_u=diag_u,
             )
         else:
-            E_norm, u_star, aux_star, parts_norm, alpha_out = minimize_energy_bb(
+            E_norm, u_star, aux_star, parts_norm, alpha_out, metrics = minimize_energy_bb(
                 initial_u_raw=u_raw,
                 initial_A=aux_prev,
                 A_t=amg.A_t,
@@ -960,16 +979,19 @@ def step7_demag_sweep(
                 grad_tol=grad_tol,            # reuse tol from CLI
                 bb_variant=bb_variant,        # or "bb1"/"bb2" if you prefer
                 debug_bb=debug_lbfgs,         # reuse debug flag
-                ls_init_stepsize=bb_alpha_prev,
+                ls_init_stepsize=alpha_prev,
                 ls_max_stepsize=ls_max_stepsize,
-                ls_print=debug_lbfgs,
                 # --- NEW: enable block-Jacobi preconditioning for BB
-                precond_mode=("block_jacobi" if h0_mode == "block_jacobi" else "none"),
+                precond_mode=(h0_mode if h0_mode=="block_jacobi" or h0_mode=="diag" else "none"),
                 diag_u=diag_u,                  # (N,3,3) Minv from precompute_block_jacobi_* (already computed above)
                 bb2_precond=bb2_precond,
             )        
-            bb_alpha_prev = float(alpha_out)
 
+        if ls_pass_init:
+            alpha_prev = float(alpha_out)
+
+        total_outer_iters += int(metrics[0])
+        total_fun_evals  += int(metrics[1])
         m_nodes = _m_from_u_raw(u_star)
         u_raw = m_nodes
 
@@ -998,6 +1020,7 @@ def step7_demag_sweep(
             (last_MH_mu0 is None)
             or (abs(MH_mu0 - last_MH_mu0) >= field.mstep)
             or (hmag == h_vals[-1])
+            or (abs(hmag) < 1e-12)
         )
         vtu_written_id = 0
         if write_now:
@@ -1028,6 +1051,19 @@ def step7_demag_sweep(
             )
             vtu_written_id = vtu_index
             last_MH_mu0 = MH_mu0
+            # Persist state at the same index as the VTU
+            try:
+                _ = save_state_with_index(
+                    basename=basename,
+                    index=vtu_index,
+                    u_raw=u_raw,          # normalized m-nodes (the code sets u_raw = m_nodes)
+                    aux_star=aux_star,    # A_nodes (A) or U_nodes (U)
+                    ms_mode=ms_mode,
+                )
+                # Optional: print confirmation
+                # print(f"[Step 7] State written -> {_}")
+            except Exception as _exc:
+                print(f"[warn] Could not write state file for index {vtu_index}: {_exc}")
 
         # ---- Console output
 
@@ -1048,6 +1084,27 @@ def step7_demag_sweep(
 
         aux_prev = aux_star
 
+    t_total = time.perf_counter() - t0
+    print("\n[Report] Optimization summary")
+    print(f" method: {method_used.upper()}  (magnetostatics: {'U (scalar)' if ms_mode=='U' else 'A (vector)'})")
+    print(f" total wall time: {t_total:.3f} s")
+    print(f" total function evaluations: {total_fun_evals}")
+    print(f" total nonlinear iterations ({method_used}): {total_outer_iters}")
+    print(" parameters:")
+    print(f"   magnetostatics: tol={a_tol}, maxiter={a_maxiter}, nu_pre={a_nu_pre}, nu_post={a_nu_post}, "
+          f"omega={a_omega}, coarse_iters={a_coarse_iters}, coarse_omega={a_coarse_omega}, "
+          f"gauge={gauge if ms_mode=='A' else 0.0}")
+    if method_used=='lbfgs':
+        print(f"   LBFGS: history={lbfgs_history}, outer_max_iter={lbfgs_it}, grad_tol={grad_tol}, "
+              f"H0_mode={h0_mode}, h0_damping={h0_damping}, "
+              f"ls_init={ls_init}, ls_init_stepsize={ls_init_stepsize}, ls_max_stepsize={ls_max_stepsize}, "
+              f"ls_increase_factor={ls_increase_factor}, ls_kind={ls_kind}, c1={ls_c1}, c2={ls_c2}, "
+              f"ls_decrease={ls_decrease}, damping_delta={damping_delta}")
+    else:
+        print(f"   BB: variant={bb_variant}, outer_max_iter={lbfgs_it}, grad_tol={grad_tol}, "
+              f"ls_init_stepsize={ls_init_stepsize}, ls_max_stepsize={ls_max_stepsize}, "
+              f"precond_mode={h0_mode if h0_mode=='block_jacobi' or h0_mode=='diag' else 'none'}, "
+              f"bb2_precond={bb2_precond}")
 
 # ---------------------------------- CLI --------------------------------------
 def main():
@@ -1122,12 +1179,15 @@ def main():
     )
     ap.add_argument(
         "--ls-init",
-        choices=["current", "max", "value", "increase"],
+        choices=["current", "max", "value", "increase", "alpha0"],
         default="increase",
         help="Line-search initial step strategy.",
     )
     ap.add_argument(
         "--ls-init-stepsize", type=float, default=1.0, help="Initial step size."
+    )
+    ap.add_argument(
+        "--ls-pass-init", action="store_true"
     )
     ap.add_argument(
         "--ls-max-stepsize", type=float, default=1.0, help="Maximum step size."
@@ -1376,6 +1436,7 @@ def main():
             h0_damping=args.h0_damping,
             ls_init=args.ls_init,
             ls_init_stepsize=args.ls_init_stepsize,
+            ls_pass_init=args.ls_pass_init,
             ls_max_stepsize=args.ls_max_stepsize,
             ls_increase_factor=args.ls_increase,
             ls_kind=args.ls_kind,
