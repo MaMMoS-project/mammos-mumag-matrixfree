@@ -1096,7 +1096,12 @@ def run_jaxopt_lbfgs_twoloop(
             init_stepsize = jnp.asarray(ls_init_stepsize, dtype=params.dtype)
         
         elif ls_init_mode == "current":
-            init_stepsize = state.stepsize
+            is_first = (state.iter_num == 0)
+            init_stepsize = jax.lax.cond(
+                is_first,
+                lambda _: jnp.asarray(ls_init_stepsize, dtype=params.dtype),
+                lambda _: state.stepsize,
+                operand=None)            
         
         elif ls_init_mode == "alpha0":
             # Quadratic initializer:
