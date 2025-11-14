@@ -1267,8 +1267,8 @@ def main():
     ap.add_argument(
         "--ls-init",
         choices=["current", "max", "value", "increase", "alpha0"],
-        default="increase",
-        help="Line-search initial step strategy.",
+        default="current",
+        help="Line-search initial step strategy (default: current)",
     )
     ap.add_argument(
             "--ls-init-stepsize", type=float, default=None, 
