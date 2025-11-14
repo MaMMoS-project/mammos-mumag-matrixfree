@@ -758,6 +758,77 @@ def _m_from_u_raw(u_raw: jnp.ndarray, eps: float = 1e-12):
     r_safe = jnp.maximum(r, jnp.asarray(eps, u_raw.dtype))
     return u_raw / r_safe[:, None]
 
+def _report_outer_params_host(
+    *,
+    solver: str,                  # "lbfgs" or "bb"
+    # --- shared across both drivers ---
+    ms_mode: str,
+    gauge: float,
+    # Core A/U-solver tuning:
+    tol: float, maxiter: int,
+    nu_pre: int, nu_post: int, omega: float,
+    coarse_iters: int, coarse_omega: float,
+    # Mapping (fixed inside step7):
+    eps_norm: float = 1e-12,
+    # Outer stopping:
+    outer_max_iter: int, grad_tol: float,
+
+    # --- LBFGS-only knobs (set to None when solver=="bb") ---
+    history_size: int | None = None,
+    debug_lbfgs: bool | None = None,
+    H0_mode: str | None = None,
+    ls_init_mode: str | None = None,
+    ls_init_stepsize: float | None = None,
+    ls_max_stepsize: float | None = None,
+    ls_increase_factor: float | None = None,
+    ls_c1: float | None = None,
+    ls_c2: float | None = None,
+    ls_decrease: float | None = None,
+    ls_increase: float | None = None,
+    diag_u=None,                  # None | (N,) | (N,3,3)
+
+    # --- BB-only knobs (set to None when solver=="lbfgs") ---
+    bb_variant: str | None = None,
+    debug_bb: bool | None = None,
+    bb2_precond: bool | None = None,
+    bb_init_steps: int | None = None,
+    precond_mode: str | None = None,   # "none"|"diag"|"block_jacobi"
+):
+    """Human-readable outer solver configuration (host-side, outside JIT)."""
+    print("\n----------------------------------------------------------------------")
+    head = f"[Outer Params :: {solver.upper()}] magnetostatics={('U (scalar)' if ms_mode=='U' else 'A (vector)')}"
+    print(head)
+    print(f" core-solver: tol={tol:.3e} maxiter={maxiter} "
+          f"nu_pre={nu_pre} nu_post={nu_post} omega={omega:.3f} "
+          f"coarse_iters={coarse_iters} coarse_omega={coarse_omega:.3f} gauge={gauge:.6g}")
+    print(f" mapping/stop: eps_norm={eps_norm:.3e} outer_max_iter={outer_max_iter} tol_fun={grad_tol:.3e}")
+
+    if solver.lower() == "lbfgs":
+        print(" LBFGS:")
+        print(f"  history={history_size} debug={bool(debug_lbfgs)} H0_mode={H0_mode}")
+        print(f"  line-search: init_mode={ls_init_mode} init_stepsize={ls_init_stepsize:.3e} "
+              f"max_stepsize={ls_max_stepsize:.3e} increase_factor={ls_increase_factor}")
+        print(f"  decrease={ls_decrease} increase={ls_increase}"
+              f"  c1={ls_c1} c2={ls_c2}")
+        if diag_u is None:
+            print("  preconditioner payload: diag_u=None")
+        else:
+            # summarize diag_u payload without dumping data
+            try:
+                sh = getattr(diag_u, "shape", None)
+                dt = str(getattr(diag_u, "dtype", None))
+                print(f"  preconditioner payload: diag_u shape={sh} dtype={dt}")
+            except Exception:
+                print("  preconditioner payload: diag_u=<unavailable>")
+    else:
+        print(" BB:")
+        print(f"  variant={bb_variant} debug={bool(debug_bb)}  "
+              f"bb_init_steps={bb_init_steps}")
+        print(f"  line-search: init_stepsize={ls_init_stepsize:.3e} "
+              f"max_stepsize={ls_max_stepsize:.3e}")
+        print(f"  decrease={ls_decrease}"
+              f"  c1={ls_c1:.3e}")
+    print("----------------------------------------------------------------------\n")
 
 def step7_demag_sweep(
     *,
@@ -782,23 +853,21 @@ def step7_demag_sweep(
     lbfgs_it=800,
     grad_tol=1e-3,
     debug_lbfgs=False,
-    # H0 (no CG)
     h0_mode="diag",
     h0_damping=1e-10,
-    # LS
     ls_init="current",
     ls_init_stepsize=1.0,
     ls_pass_init=False,
     ls_max_stepsize=1.0,
-    ls_increase_factor=2.0,
-    ls_kind='default',
+    ls_increase_factor=1.5,
     ls_c1=1e-4,
     ls_c2=0.9,
     ls_decrease=0.5,
-    damping_delta=0.2,
+    ls_increase=2.0,
     solver='lbfgs',
-    bb_variant='bb2',
+    bb_variant='alt',
     bb2_precond=True,
+    bb_init_steps=2,
 ):
 
     t0 = time.perf_counter()
@@ -881,6 +950,41 @@ def step7_demag_sweep(
                 pass
     last_MH_mu0 = None
 
+    # --- print once before the field loop ---
+    if solver == 'lbfgs':
+        _report_outer_params_host(
+            solver='lbfgs',
+            ms_mode=ms_mode,
+            gauge=(gauge if ms_mode == "A" else 0.0),
+            tol=a_tol, maxiter=a_maxiter,
+            nu_pre=a_nu_pre, nu_post=a_nu_post, omega=a_omega,
+            coarse_iters=a_coarse_iters, coarse_omega=a_coarse_omega,
+            eps_norm=1e-12,
+            outer_max_iter=lbfgs_it, grad_tol=grad_tol,
+            history_size=lbfgs_history,
+            debug_lbfgs=debug_lbfgs,
+            H0_mode=h0_mode,
+            ls_init_mode=ls_init, ls_init_stepsize=ls_init_stepsize,
+            ls_max_stepsize=ls_max_stepsize, ls_increase_factor=ls_increase_factor,
+            ls_c1=ls_c1, ls_c2=ls_c2, ls_decrease=ls_decrease, ls_increase=ls_increase,
+            diag_u=diag_u,
+        )
+    else:
+        _report_outer_params_host(
+            solver='bb',
+            ms_mode=ms_mode,
+            gauge=(gauge if ms_mode == "A" else 0.0),
+            tol=a_tol, maxiter=a_maxiter,
+            nu_pre=a_nu_pre, nu_post=a_nu_post, omega=a_omega,
+            coarse_iters=a_coarse_iters, coarse_omega=a_coarse_omega,
+            eps_norm=1e-12,
+            outer_max_iter=lbfgs_it, grad_tol=grad_tol,  # 'lbfgs_it' reused as outer_max_iter for BB
+            bb_variant=bb_variant, debug_bb=debug_lbfgs,  # same debug flag reused
+            bb_init_steps=bb_init_steps,
+            ls_init_stepsize=ls_init_stepsize, ls_max_stepsize=ls_max_stepsize,
+            ls_c1=ls_c1, ls_decrease=ls_decrease,
+        )
+
     # header for output
     with open(dat_path, "w", encoding="utf-8") as f:
         f.write(
@@ -939,11 +1043,10 @@ def step7_demag_sweep(
                 ls_init_stepsize=alpha_prev,
                 ls_max_stepsize=ls_max_stepsize,
                 ls_increase_factor=ls_increase_factor,
-                ls_kind=ls_kind,
                 ls_c1=ls_c1,
                 ls_c2=ls_c2,
                 ls_decrease=ls_decrease,
-                damping_delta=damping_delta,
+                ls_increase=ls_increase,
                 diag_u=diag_u,
             )
         else:
@@ -981,10 +1084,9 @@ def step7_demag_sweep(
                 debug_bb=debug_lbfgs,         # reuse debug flag
                 ls_init_stepsize=alpha_prev,
                 ls_max_stepsize=ls_max_stepsize,
-                # --- NEW: enable block-Jacobi preconditioning for BB
-                precond_mode=(h0_mode if h0_mode=="block_jacobi" or h0_mode=="diag" else "none"),
-                diag_u=diag_u,                  # (N,3,3) Minv from precompute_block_jacobi_* (already computed above)
-                bb2_precond=bb2_precond,
+                ls_c1=ls_c1,
+                ls_decrease=ls_decrease,
+                bb_init_steps=bb_init_steps,
             )        
 
         if ls_pass_init:
@@ -1090,21 +1192,6 @@ def step7_demag_sweep(
     print(f" total wall time: {t_total:.3f} s")
     print(f" total function evaluations: {total_fun_evals}")
     print(f" total nonlinear iterations ({method_used}): {total_outer_iters}")
-    print(" parameters:")
-    print(f"   magnetostatics: tol={a_tol}, maxiter={a_maxiter}, nu_pre={a_nu_pre}, nu_post={a_nu_post}, "
-          f"omega={a_omega}, coarse_iters={a_coarse_iters}, coarse_omega={a_coarse_omega}, "
-          f"gauge={gauge if ms_mode=='A' else 0.0}")
-    if method_used=='lbfgs':
-        print(f"   LBFGS: history={lbfgs_history}, outer_max_iter={lbfgs_it}, grad_tol={grad_tol}, "
-              f"H0_mode={h0_mode}, h0_damping={h0_damping}, "
-              f"ls_init={ls_init}, ls_init_stepsize={ls_init_stepsize}, ls_max_stepsize={ls_max_stepsize}, "
-              f"ls_increase_factor={ls_increase_factor}, ls_kind={ls_kind}, c1={ls_c1}, c2={ls_c2}, "
-              f"ls_decrease={ls_decrease}, damping_delta={damping_delta}")
-    else:
-        print(f"   BB: variant={bb_variant}, outer_max_iter={lbfgs_it}, grad_tol={grad_tol}, "
-              f"ls_init_stepsize={ls_init_stepsize}, ls_max_stepsize={ls_max_stepsize}, "
-              f"precond_mode={h0_mode if h0_mode=='block_jacobi' or h0_mode=='diag' else 'none'}, "
-              f"bb2_precond={bb2_precond}")
 
 # ---------------------------------- CLI --------------------------------------
 def main():
@@ -1184,46 +1271,49 @@ def main():
         help="Line-search initial step strategy.",
     )
     ap.add_argument(
-        "--ls-init-stepsize", type=float, default=1.0, help="Initial step size."
+            "--ls-init-stepsize", type=float, default=None, 
+            help="Initial step size (default: 1 for lbfgs, 100.0 for bb)."
     )
     ap.add_argument(
         "--ls-pass-init", action="store_true"
     )
     ap.add_argument(
-        "--ls-max-stepsize", type=float, default=1.0, help="Maximum step size."
+        "--ls-max-stepsize", type=float, default=1.0e5, help="Maximum step size."
     )
     ap.add_argument(
-        "--ls-increase",
+        "--ls-increase-factor",
         type=float,
         default=1.5,
-        help="Expansion factor when --ls-init=increase.",
+        help="Expansion factor when --ls-init=increase",
     )
     ap.add_argument(
         "--ls-kind",
-        choices=["default", "armijo", "goldstein", "wolfe", "strong-wolfe"],
+        choices=["default", "armijo", "goldstein", "wolfe", "strong-wolfe", "curvilinear-armijo"],
         default="default",
         help=(
             "Line-search flavor for L-BFGS: 'default' keeps JAXopt's zoom Strong-Wolfe; "
             "otherwise use a backtracking line search with the chosen condition."
         ),
     )
-    ap.add_argument("--ls-c1", type=float, default=1e-4,
+    ap.add_argument("--ls-c1", type=float, default=0.3,
                     help="Line-search c1 (sufficient decrease) for backtracking LS.")
-    ap.add_argument("--ls-c2", type=float, default=0.9,
+    ap.add_argument("--ls-c2", type=float, default=0.7,
                     help="Line-search c2 (curvature) for backtracking Wolfe/Strong-Wolfe.")
     ap.add_argument("--ls-decrease", type=float, default=0.5,
                     help="Backtracking decrease factor (shrink multiplier, in (0,1)).")
-    ap.add_argument("--damping-delta", type=float, default=0.2,
-                    help="Powell damping delta; enforces s^T ỹ ≥ delta * s^T B s.")
+    ap.add_argument("--ls-increase", type=float, default=2.0,
+                    help="Linesearch increase factor (expandion multiplier, > 1).")
     ap.add_argument(
     "--solver",
     choices=["lbfgs", "bb"],
     default="lbfgs",
     help="Outer minimizer: L-BFGS (two-loop) or Barzilai Borwein."
     )
-    ap.add_argument("--bb-variant", choices=["alt","bb1","bb2"], default="bb2",
+    ap.add_argument("--bb-variant", choices=["alt","bb1","bb2"], default="alt",
                     help="variant of Barzilai-Borwein method")
     ap.add_argument("--bb2-precond", action="store_true")
+    ap.add_argument("--bb-init-steps", type=int, default=2,
+                    help="initial number of linesearch steps")
     args = ap.parse_args()
 
     # Step 1
@@ -1409,6 +1499,13 @@ def main():
         print(
             "\n[Step 7] Demagnetization sweep: two-loop L-BFGS at each field step ..."
         )
+        if args.ls_init_stepsize:
+            ls_init_stepsize = args.ls_init_stepsize
+        else:
+            if args.solver=='bb':
+                ls_init_stepsize = 100.0
+            else:
+                ls_init_stepsize = 1.0
         base = _basename_from_mesh(args.mesh)
         step7_demag_sweep(
             basename=base,
@@ -1435,18 +1532,18 @@ def main():
             h0_mode=args.h0,
             h0_damping=args.h0_damping,
             ls_init=args.ls_init,
-            ls_init_stepsize=args.ls_init_stepsize,
+            ls_init_stepsize=ls_init_stepsize,
             ls_pass_init=args.ls_pass_init,
             ls_max_stepsize=args.ls_max_stepsize,
-            ls_increase_factor=args.ls_increase,
-            ls_kind=args.ls_kind,
+            ls_increase_factor=args.ls_increase_factor,
             ls_c1=args.ls_c1,
             ls_c2=args.ls_c2,
             ls_decrease=args.ls_decrease,
-            damping_delta=args.damping_delta,
+            ls_increase=args.ls_increase,
             solver=args.solver,
             bb_variant=args.bb_variant,
             bb2_precond=args.bb2_precond,
+            bb_init_steps=args.bb_init_steps,
         )
         print(f"[Step 7] Sweep finished. Appended results to {base}.dat")
     elif args.no_demag:
