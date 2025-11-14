@@ -95,8 +95,7 @@ A simple INI file next to the mesh, same basename. Sections and keys used:
 
 ```ini
 [mesh]
-size = 1.0e-9   ; characteristic length [m]; also scales energies by size^3
-# optional overrides of shell grading (if omitted, use CLI defaults or .p2 values)
+size = 1.0e-9   
 K  = 1.5
 KL = 5.0
 
@@ -106,24 +105,36 @@ my = 0.0
 mz = 1.0
 
 [field]
-# magnitudes given in Tesla; converted to A/m via division by μ0
 hstart = 0.0
 hfinal = 0.0
 hstep  = -0.002
-# direction (will be normalized)
 hx = 0.0
 hy = 0.0
 hz = 1.0
-# VTU cadence and early-stop threshold
-mstep  = 0.4   ; write a VTU whenever |Δ(μ0 M·ĥ)| ≥ mstep [T]
-mfinal = -1.2  ; optional stop criterion (reported)
+mstep  = 0.4   
+mfinal = -1.2  
 
 [minimizer]
 tol_fun = 1e-8
-# tolerance used to set the inner A-solver tolerance ≈ tol_hmag_factor * tol_fun^(1/3)
 tol_hmag_factor = 1.0
 ```
-All keys are parsed robustly; missing entries fall back to sensible defaults. citeturn1search3
+All keys are parsed robustly; missing entries fall back to sensible defaults. 
+
+| key             | type  | comment                          | comment                                                      |
+| --------------- | ----- | -------------------------------- | ------------------------------------------------------------ |
+| size            | float | mesh units in m                  |                                                              |
+| KL              | float | expansion factor of sample       | if omitted defaults from CLI are used, CLI overwrite         |
+| K               | float | expansion factor for air layers  | if omitted defaults from CLI are used, CLI overwrite         |
+| hstart          | float | start value of the field         | in Tesla (to convert from A/m multiply with µ0)              |
+| hfinal          | float | final value of the field         | in Tesla (to convert from A/m multiply with µ0)              |
+| hstep           | float | field step                       | in Tesla (to convert from A/m multiply with µ0)              |
+| hx,hy,hz        | float | field direction                  | will be normalized                                           |
+| mstep           | float | output frequency                 | write vtu file when delta µ0M > mstep                        |
+| mfinal          | float | µ0M for early stopping           | not used                                                     |
+| tol_fun         | float | Optimality tolerance             | see Practical Optimization, Gill & Murry; can be overwrite with CLI |
+| tol_hmag_factor | float | tolerance for magnetic potential | ≈ tol_hmag_factor * tol_fun^(1/3)                            |
+
+
 
 #### (c) Material table (`.krn`)
 A whitespace‑delimited text file; each **non‑comment** line describes one ferromagnetic material group in the mesh:
@@ -382,22 +393,36 @@ The solver supports both formulations, but prefers the **vector potential** due 
 
 ### Energy minimization with a unit‑length constraint
 
-#### Problem and constraint
+#### Curvilinear updates on the sphere (unit‑norm preserved)
 
-We minimize the micromagnetic energy
-$$
-E(\mathbf m)=E_{\text{ex}}(\mathbf m)+E_{\text{ani}}(\mathbf m)+E_{\text{Z}}(\mathbf m)+E_{\text{ms}}(\mathbf m),
-\quad \text{subject to }|\mathbf m(\mathbf x)|=1\ \text{a.e. in }\Omega,
-$$
-with \(\mathbf M=M_s\mathbf m\) and the usual exchange, anisotropy, Zeeman and magnetostatic terms in the Brown framework. The unit‑length constraint is intrinsic to micromagnetics and must be preserved during minimization to remain on the physical manifold \(\mathbb S^2\).
+To enforce the physical constraint \(\|\mathbf m(\mathbf x)\|=1\) without ad‑hoc renormalization, we optimize over a **curvilinear path on the sphere** at each iteration. Starting from the current nodal magnetization \(\mathbf U \in \mathbb{R}^{N\times 3}\) with unit rows \(\|\mathbf U_i\|=1\), we first build a **tangent search direction**
 
-#### Unconstrained parametrization \( \mathbf m=\mathbf u/\|\mathbf u\| \)
+\(\mathbf d_{\mathrm{tan}} \;=\; \mathbf d \;-\; (\mathbf d\!\cdot\!\mathbf U)\,\mathbf U,\)
 
-Instead of Lagrange multipliers or ad hoc penalties, we employ the **normalized variable** \(\mathbf m=\mathbf u/\|\mathbf u\|\) at each node (with \(\mathbf u\neq \mathbf 0\)). This enforces \(|\mathbf m|=1\) by construction and allows us to work in an unconstrained space for \(\mathbf u\). The gradient with respect to \(\mathbf u\) follows from the chain rule:
-$$
-\nabla_{\mathbf u}E=\frac{1}{\|\mathbf u\|}\Big(I-\mathbf m\mathbf m^{\!\top}\Big)\,\nabla_{\mathbf m}E,
-$$
-i.e., it is the **tangent‑plane projection** of \(\nabla_{\mathbf m}E\), which is equivalent to a projected‑gradient step on the sphere. This idea matches the standard constrained‑descent viewpoint (projected or manifold gradient descent) and is widely used in micromagnetics to preserve \(|\mathbf m|=1\) during optimization.
+i.e., the component of the descent direction orthogonal to each \(\mathbf U_i\). We then move **along a great‑circle–like curve** on \(\mathbb S^2\) parameterized by a scalar step $\tau$. The update
+
+\(\mathbf U(\tau)=\operatorname{CurvilinearStep}\!\left(\mathbf U,\,\mathbf d_{\mathrm{tan}},\,\tau\right)\)
+
+is chosen so that \(\|\mathbf U_i(\tau)\|=1\) holds **exactly** for all \(\tau\) and all nodes \(i\); no post‑step projection is needed. In code, the path is implemented by forming
+
+\(\mathbf H = \mathbf U \times \mathbf d_{\mathrm{tan}},\qquad  \mathbf U'(\tau)=\tfrac12\,\mathbf W_{-}(\tau)^{-1}\,\mathbf H_\times\!\big(\mathbf U+\mathbf U(\tau)\big), \quad \mathbf W_{-}(\tau)=\mathbf I-\tfrac{\tau}{2}\,\mathbf H_\times,\)
+
+where \(\mathbf H_\times\) is the per‑node skew matrix of the cross product with \(\mathbf H\). This gives a **differentiable path** on the sphere with \(\mathbf U'(0)=\mathbf d_{\mathrm{tan}}\), which we use for line search (see below).
+
+#### Why this matters
+
+- **Constraint preserved by construction.** Because the curve lives on \(\mathbb S^2\), every trial point satisfies \(\|\mathbf m\|=1\); you avoid drift and repeated normalize‑project cycles. 
+- **Correct directional derivatives.** We evaluate the derivative of the merit function along the curve via \(\phi'(\tau)=\langle \nabla E(\mathbf U(\tau)),\,\mathbf U'(\tau)\rangle\), using the analytic $\mathbf U'(\tau)$ above. This is essential for robust Armijo/Wolfe‑type tests on manifolds.
+- **Works with L‑BFGS and BB.** The same curvilinear path underlies both our **two‑loop L‑BFGS** (with custom \(H_0\) and **Barzilai–Borwein** drivers; only the strategy for picking \(\tau\) changes.
+
+#### Line search on the manifold
+
+We provide two backtracking strategies defined **along the curvilinear path**:
+
+- **Modified Armijo on the curve.** A robust variant using the dimensionless decrease ratio \(D(\tau)=(\phi(\tau)-\phi(0))/(\tau\,\phi'(0))\) with adaptive enlarge/reduce phases; this converges well even when the local model is non‑quadratic. This line search is used for the L-BFGS method.
+- **Armijo backtracking line search on the curve** that uses a fixed shrinkage factor and sufficient decrease condition. This line search is used for the starting iterations of the Barzilai-Borwein method.
+
+Both yield a step $\tau$ that **guarantees sufficient decrease** while staying on \(\mathbb S^2\), so the outer optimizer never violates the norm constraint.
 
 #### Algorithmic options and our choice
 
@@ -409,6 +434,20 @@ A variety of solvers are used in static micromagnetics:
 - **Quasi‑Newton methods (L‑BFGS).** Exploit curvature information via a short memory of curvature pairs \((s_k,y_k)\), with **linear memory** and \(O(nm)\) cost per iteration (small \(m\)). They are attractive for very large problems where full Hessian information is impractical.
 
 **We use L‑BFGS with line search**, because it provides robust, often superlinear, convergence in high dimensions at modest per‑iteration cost, and it integrates naturally with the normalized representation. Compared with NCG, L‑BFGS typically attains a good metric of the local curvature after a few iterations, reducing sensitivity to line‑search parameters and delivering fewer energy/gradient evaluations overall.
+
+Alternatively, the solver supports the **Barzilai–Borwein (BB) method**, a gradient-based optimizer that approximates curvature information using simple scalar step sizes derived from previous iterates. While BB typically requires more iterations than L‑BFGS, it offers a lightweight alternative with minimal memory overhead and no need to store or update quasi-Newton matrices. This makes it particularly attractive for large-scale problems. 
+
+To switch between the optimization methods in `loop.py`, use the `--solver` command-line option:
+
+--solver {lbfgs, bb}
+
+- Use `--solver lbfgs` to run the **L‑BFGS** optimizer (default).
+- Use `--solver bb` to switch to the **Barzilai–Borwein** method.
+
+You can also fine-tune each method with additional flags:
+
+- For L‑BFGS: `--lbfgs-history`, `--h0`, `--tol-fun`, etc.
+- For BB: `--bb-variant`, `--bb2-precond`, `--bb-init-steps`, and shared line search options.
 
 #### Why **preconditioned** L‑BFGS?
 
