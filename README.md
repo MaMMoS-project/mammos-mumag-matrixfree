@@ -125,6 +125,7 @@ All keys are parsed robustly; missing entries fall back to sensible defaults.
 | size            | float | mesh units in m                  |                                                              |
 | KL              | float | expansion factor of sample       | if omitted defaults from CLI are used, CLI overwrite         |
 | K               | float | expansion factor for air layers  | if omitted defaults from CLI are used, CLI overwrite         |
+| mx,mx,mz        | float | initial magnetic state           | uniform                                                      |
 | hstart          | float | start value of the field         | in Tesla (to convert from A/m multiply with µ0)              |
 | hfinal          | float | final value of the field         | in Tesla (to convert from A/m multiply with µ0)              |
 | hstep           | float | field step                       | in Tesla (to convert from A/m multiply with µ0)              |
@@ -160,6 +161,68 @@ A whitespace‑delimited text file; each **non‑comment** line describes one fe
   ```
     where `ĥ` is the (unit) field direction from `.p2` and 
     `E_norm = E / E_ref` (dimensionless). `E_ref` is the magnetostatic energy of the initial state.
+
+Here’s a concise README section you can drop in to document **initial magnetic states** and how to **resume from a stored state**.
+
+------
+
+### Initial states and resuming from a stored state
+
+`loop.py` supports several ways to choose the **initial magnetization** for a run:
+
+#### 1) Uniform state (default or from `.p2`)
+
+- By default, the code starts from a **uniform** magnetization taken from the `[initial state]` section of the sidecar `.p2` file: 
+
+  `````
+  [initial state]
+  mx = 0.0
+  my = 0.0
+  mz = 1.0
+  ini = 0´    
+  `````
+
+  resume index ini, set it to the number of the start state, = 0 no resume.
+
+- You can override this on the CLI with: 
+  `--ini uniform` which ignores `mx,my,mz` in `.p2` and uses `(0,0,1)`. 
+
+  or
+  `--ini number` for restarting from a stored state. (see below)
+
+#### 2) Vortex test state
+
+- For debugging or exploratory runs, you can start from a **y–z plane vortex** field: '`--ini vortex`
+
+#### 3) Resume from a stored state (checkpoint)
+
+During the sweep, whenever a VTU snapshot is written, the solver also saves a **checkpoint** next to it:
+
+```
+<basename>.<step>.state.npz
+```
+
+This file contains:
+
+- the current **magnetization variable** (same shape as m-nodes, already unit‑normalized), and
+- the current **auxiliary potential** (**A** for vector formulation or **U** for scalar),
+- a **mode flag** ensuring you resume with the same magnetostatics formulation.
+
+You can resume from such a checkpoint in **two** ways:
+
+- **CLI takes precedence**: python loop.py --mesh body.npz --ini 0020 # resumes from body.0020.state.npz
+- **From `.p2`** (if `--ini` is not supplied): [initial state]ini = 20  ; resumes from <basename>.0020.state.npz where `<basename>` is the mesh basename (e.g., `body` ⇒ `body.0020.state.npz`).
+
+**What happens on resume**
+
+- The solver loads the saved magnetization and the A/U potential and continues the field schedule from your current `.p2`.
+- VTU numbering continues **from the resume index** (the next VTU will be `<resume_index+1>`), and the stored A/U field is used as a **warm start** for the magnetostatics solve at the next step—this speeds up the first iteration after resuming.
+
+**Requirements / caveats**
+
+- The checkpoint must match the **magnetostatics mode** you run with now (`--ms U` or `--ms A`); cross‑mode resumes are rejected.
+- The **mesh** must be the **same** (same node count/connectivity). Changing the mesh invalidates the checkpoint.
+- Checkpoints are written only when a VTU is emitted, which is controlled by the cadence parameter `mstep` in `.p2`. If you stop before a VTU threshold is crossed, there may be **no** state file to resume from.
 
 ## Command‑line usage (single entry point)
 
