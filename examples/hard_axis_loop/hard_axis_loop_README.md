@@ -18,19 +18,20 @@ $$
 \mu_0 H_{ani} = \mu_0 \frac{2 K_1}{J_s}
 $$
 
-With the parameters of Nd\(_2\)Fe\(_ {14}\)B (\(K_1 = 4.3 \times 10^6 \; \text{J/m}^3\), \(J_s = 1.61 \; \text{T}\)), the anisotropy field is 
+With the parameters of $Nd\(2\)Fe\({14}\)B \(\(K_1 = 4.3 \times 10^6 \; \text{J/m}^3\), \(J_s = 1.61 \; \text{T}\)\)$, the anisotropy field is 
 
-\(\mu_0 H_{ani} =6.71 \; \text{T}\)
+$$\(\mu_0 H_{ani} =6.71 \; \text{T}\)$$
 
 
 - **Magnetostatic energy of a sphere**:
 
 We also check the magnetostatic field computation. For a sphere there is an analytical solution for the magnetostatic energy.
+
 $$
-E_{mag} = \frac{1}{2} \mu_0 N M_s^2 V
+E_{mag} = \frac{1}{2} \mu_0 N {M_{s}}^2 V
 $$
 
-For a sphere, \(N = \frac{1}{3}\). This formula is used to check the relative error printed by the solver when using `--print-energy`.
+For a sphere, $\(N = \frac{1}{3}\)$. This formula is used to check the relative error printed by the solver when using `--print-energy`.
 
 ---
 
