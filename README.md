@@ -562,30 +562,38 @@ This reduction is consistent with the general experience that **directionally aw
 
 #### Variational problems and linear systems
 
-Following the *Magnetostatic field computation* section, we compute the magnetostatic field using either the **vector potential** \(\mathbf A\) or the **scalar potential** \(U\), depending on the formulation.
+Following the *Magnetostatic field computation* section, we compute the magnetostatic field using either the **vector potential** $\(\mathbf A\)$ or the **scalar potential** $\(U\)$, depending on the formulation.
 
 #### Vector potential formulation
 
 We solve the **gauged curl–curl** problem resulting from minimizing Brown’s functional with respect to \(\mathbf A\):
+
 $$
 \frac{1}{\mu_0}(\nabla\times\mathbf A,\nabla\times\mathbf v)_\Omega + \alpha,(\mathbf A,\mathbf v)_\Omega = (\mathbf M,\nabla\times\mathbf v)_\Omega \quad \forall\mathbf v\in V_h,
 $$
+
 where \(V_h\) is the space of nodal finite element functions. Which leads to the symmetric positive system:
+
 $$
 \left(\tfrac{1}{\mu_0} C^{\top}C + \alpha,M\right)\mathbf A = C^{\top}\mathbf b_M,
 $$
+
 with \(C\) the discrete curl operator assembled from nodal basis functions, \(M\) a mass matrix, and \(\mathbf b_M\) the magnetization term. The small gauge \(\alpha>0\) removes the large kernel of the curl operator and enables robust conjugate gradient solves.
 
 #### Scalar potential formulation
 
 Alternatively, we solve for the **magnetic scalar potential** (U) via a Poisson-like equation derived from minimizing the scalar form of Brown’s functional:
+
 $$
 \mu_0(K\nabla U, \nabla v)_\Omega = (\nabla\cdot\mathbf M, v)_\Omega \quad \forall v \in H^1(\Omega),
 $$
+
 which yields the symmetric positive system:
+
 $$
 \mu_0 K U = \mathbf b_U
 $$
+
 where \(K\) is the stiffness matrix and \(\mathbf b_U\) encodes the divergence of the magnetization.
 
 #### What we actually use: a light‑weight AMG with **Jacobi smoothing only**
@@ -598,9 +606,11 @@ For both vector and scalar formulations, we use a **plain V‑cycle AMG** precon
 #### Surrogate used to guide algebraic coarsening
 
 To guide coarsening, we assemble a **scalar Laplacian surrogate** on the tetrahedral mesh using the standard \(P_1\) stiffness:
+
 $$
 L_{ij} = \sum_{e} V_e,\nabla\phi_i\cdot\nabla\phi_j,
 $$
+
 computed element-wise via gradients \(\nabla\phi_i\) and volumes \(V_e\). This surrogate provides a robust graph for algebraic multigrid aggregation. 
 
 #### End‑to‑end algorithm
@@ -631,16 +641,20 @@ The first approach—graded air region—is widely used for micromagnetics becau
 
 #### Our Approach: Graded Air Layers  
 
-We surround the magnetic body with **nested homothetic shells** forming a graded “air box.” Starting from the body’s outer surface \(S_0\), we generate scaled copies  
+We surround the magnetic body with **nested homothetic shells** forming a graded “air box.” Starting from the body’s outer surface $\(S_0\)$, we generate scaled copies  
+
 $$
 S_\ell = K^\ell S_0,\quad \ell = 1,\dots,L,
 $$
+
 about a chosen center (typically the origin). These surfaces are meshed into tetrahedral layers using TetGen via MeshPy. Each layer is assigned a **region attribute** and a **maximum volume constraint** to enforce gradual coarsening.  
 
 **Mesh-size schedule:**  
+
 $$
 h_\ell = h_0 \bigl(K^\beta\bigr)^{\ell+1},\quad \ell=0,\dots,L-1,
 $$
+
 where \(h_0\) is the target edge near the magnet, \(K>1\) the geometric scale factor, and \(\beta\) controls growth. If \(h_0\) is not provided, we estimate it from the median boundary-edge length of the body surface.  
 
 This strategy pushes the artificial boundary far away while keeping the number of degrees of freedom manageable. It is consistent with best practices in computational electromagnetics for open boundaries.  
