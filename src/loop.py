@@ -24,7 +24,7 @@ from energies import (
 from optimize import (
     prepare_core_amg,
     prepare_core_amg_scalar,  # <-- scalar AMG prep
-    minimize_energy_lbfgs, 
+    minimize_energy_lbfgs,
     minimize_energy_bb,
     make_uniform_u_raw,
     precompute_diag_tangent_from_geom,
@@ -116,12 +116,17 @@ def _getfloat_relaxed(cfg, section, option, default=None):
         except Exception:
             return default
 
+
 import re
 
-_INT_RX = re.compile(r"""
+_INT_RX = re.compile(
+    r"""
     [\-\+]?          # optional sign
     \d+              # one or more digits
-""", re.VERBOSE)
+""",
+    re.VERBOSE,
+)
+
 
 def _getint_relaxed(cfg, section, option, default=None):
     """
@@ -156,6 +161,7 @@ def _getint_relaxed(cfg, section, option, default=None):
             return int(m.group(0)) if m else default
         except Exception:
             return default
+
 
 def _normalize(v: Tuple[float, float, float], eps=1e-30):
     x, y, z = v
@@ -600,8 +606,10 @@ def write_vtu_MHB(
     mesh.write(out_path)
     return out_path
 
-def save_state_with_index(*, basename: str, index: int,
-                          u_raw, aux_star, ms_mode: str) -> str:
+
+def save_state_with_index(
+    *, basename: str, index: int, u_raw, aux_star, ms_mode: str
+) -> str:
     """
     Save current state (u_raw and aux_star) to an .npz named with the VTU index.
     File name: {basename}.{index:04d}.state.npz
@@ -640,8 +648,9 @@ def save_state_with_index(*, basename: str, index: int,
     return out_path
 
 
-def load_state_file(state_path: str, *, expected_N: int | None = None,
-                    ms_mode: str | None = None):
+def load_state_file(
+    state_path: str, *, expected_N: int | None = None, ms_mode: str | None = None
+):
     """
     Load a previously saved state (.npz) and return (u_raw, aux_star).
 
@@ -660,6 +669,7 @@ def load_state_file(state_path: str, *, expected_N: int | None = None,
         JAX arrays ready to be used as initial state.
     """
     import numpy as np
+
     data = np.load(state_path, allow_pickle=False)
 
     # Extract mandatory arrays
@@ -677,9 +687,7 @@ def load_state_file(state_path: str, *, expected_N: int | None = None,
             f"!= expected N={expected_N}"
         )
     if ms_mode is not None and ms_mode != saved_mode:
-        raise ValueError(
-            f"State file ms_mode={saved_mode!r} != requested {ms_mode!r}"
-        )
+        raise ValueError(f"State file ms_mode={saved_mode!r} != requested {ms_mode!r}")
 
     # Return as JAX arrays
     return jnp.asarray(u_raw_np), jnp.asarray(aux_star_np)
@@ -700,13 +708,14 @@ def _parse_int_or_none(s: str | None) -> int | None:
     except ValueError:
         return None
 
-def make_resume_state_path(base,ini,initial):
-   idx = _parse_int_or_none(ini)
-   if idx:
-      return f"{base}.{idx:04d}.state.npz"
-   if initial.ini > 0:
-      return f"{base}.{initial.ini:04d}.state.npz"
-   return None
+
+def make_resume_state_path(base, ini, initial):
+    idx = _parse_int_or_none(ini)
+    if idx:
+        return f"{base}.{idx:04d}.state.npz"
+    if initial.ini > 0:
+        return f"{base}.{initial.ini:04d}.state.npz"
+    return None
 
 
 # ----------------------------- Step 7: sweep ---------------------------------
@@ -758,21 +767,26 @@ def _m_from_u_raw(u_raw: jnp.ndarray, eps: float = 1e-12):
     r_safe = jnp.maximum(r, jnp.asarray(eps, u_raw.dtype))
     return u_raw / r_safe[:, None]
 
+
 def _report_outer_params_host(
     *,
-    solver: str,                  # "lbfgs" or "bb"
+    solver: str,  # "lbfgs" or "bb"
     # --- shared across both drivers ---
     ms_mode: str,
     gauge: float,
     # Core A/U-solver tuning:
-    tol: float, maxiter: int,
-    nu_pre: int, nu_post: int, omega: float,
-    coarse_iters: int, coarse_omega: float,
+    tol: float,
+    maxiter: int,
+    nu_pre: int,
+    nu_post: int,
+    omega: float,
+    coarse_iters: int,
+    coarse_omega: float,
     # Mapping (fixed inside step7):
     eps_norm: float = 1e-12,
     # Outer stopping:
-    outer_max_iter: int, grad_tol: float,
-
+    outer_max_iter: int,
+    grad_tol: float,
     # --- LBFGS-only knobs (set to None when solver=="bb") ---
     history_size: int | None = None,
     debug_lbfgs: bool | None = None,
@@ -785,31 +799,35 @@ def _report_outer_params_host(
     ls_c2: float | None = None,
     ls_decrease: float | None = None,
     ls_increase: float | None = None,
-    diag_u=None,                  # None | (N,) | (N,3,3)
-
+    diag_u=None,  # None | (N,) | (N,3,3)
     # --- BB-only knobs (set to None when solver=="lbfgs") ---
     bb_variant: str | None = None,
     debug_bb: bool | None = None,
     bb2_precond: bool | None = None,
     bb_init_steps: int | None = None,
-    precond_mode: str | None = None,   # "none"|"diag"|"block_jacobi"
+    precond_mode: str | None = None,  # "none"|"diag"|"block_jacobi"
 ):
     """Human-readable outer solver configuration (host-side, outside JIT)."""
     print("\n----------------------------------------------------------------------")
-    head = f"[Outer Params :: {solver.upper()}] magnetostatics={('U (scalar)' if ms_mode=='U' else 'A (vector)')}"
+    head = f"[Outer Params :: {solver.upper()}] magnetostatics={('U (scalar)' if ms_mode == 'U' else 'A (vector)')}"
     print(head)
-    print(f" core-solver: tol={tol:.3e} maxiter={maxiter} "
-          f"nu_pre={nu_pre} nu_post={nu_post} omega={omega:.3f} "
-          f"coarse_iters={coarse_iters} coarse_omega={coarse_omega:.3f} gauge={gauge:.6g}")
-    print(f" mapping/stop: eps_norm={eps_norm:.3e} outer_max_iter={outer_max_iter} tol_fun={grad_tol:.3e}")
+    print(
+        f" core-solver: tol={tol:.3e} maxiter={maxiter} "
+        f"nu_pre={nu_pre} nu_post={nu_post} omega={omega:.3f} "
+        f"coarse_iters={coarse_iters} coarse_omega={coarse_omega:.3f} gauge={gauge:.6g}"
+    )
+    print(
+        f" mapping/stop: eps_norm={eps_norm:.3e} outer_max_iter={outer_max_iter} tol_fun={grad_tol:.3e}"
+    )
 
     if solver.lower() == "lbfgs":
         print(" LBFGS:")
         print(f"  history={history_size} debug={bool(debug_lbfgs)} H0_mode={H0_mode}")
-        print(f"  line-search: init_mode={ls_init_mode} init_stepsize={ls_init_stepsize:.3e} "
-              f"max_stepsize={ls_max_stepsize:.3e} increase_factor={ls_increase_factor}")
-        print(f"  decrease={ls_decrease} increase={ls_increase}"
-              f"  c1={ls_c1} c2={ls_c2}")
+        print(
+            f"  line-search: init_mode={ls_init_mode} init_stepsize={ls_init_stepsize:.3e} "
+            f"max_stepsize={ls_max_stepsize:.3e} increase_factor={ls_increase_factor}"
+        )
+        print(f"  decrease={ls_decrease} increase={ls_increase}  c1={ls_c1} c2={ls_c2}")
         if diag_u is None:
             print("  preconditioner payload: diag_u=None")
         else:
@@ -822,13 +840,17 @@ def _report_outer_params_host(
                 print("  preconditioner payload: diag_u=<unavailable>")
     else:
         print(" BB:")
-        print(f"  variant={bb_variant} debug={bool(debug_bb)}  "
-              f"bb_init_steps={bb_init_steps}")
-        print(f"  line-search: init_stepsize={ls_init_stepsize:.3e} "
-              f"max_stepsize={ls_max_stepsize:.3e}")
-        print(f"  decrease={ls_decrease}"
-              f"  c1={ls_c1:.3e}")
+        print(
+            f"  variant={bb_variant} debug={bool(debug_bb)}  "
+            f"bb_init_steps={bb_init_steps}"
+        )
+        print(
+            f"  line-search: init_stepsize={ls_init_stepsize:.3e} "
+            f"max_stepsize={ls_max_stepsize:.3e}"
+        )
+        print(f"  decrease={ls_decrease}  c1={ls_c1:.3e}")
     print("----------------------------------------------------------------------\n")
+
 
 def step7_demag_sweep(
     *,
@@ -864,12 +886,11 @@ def step7_demag_sweep(
     ls_c2=0.9,
     ls_decrease=0.5,
     ls_increase=2.0,
-    solver='lbfgs',
-    bb_variant='alt',
+    solver="lbfgs",
+    bb_variant="alt",
     bb2_precond=True,
     bb_init_steps=2,
 ):
-
     t0 = time.perf_counter()
     total_fun_evals = 0
     total_outer_iters = 0
@@ -904,17 +925,16 @@ def step7_demag_sweep(
     else:
         diag_u = None
 
-    resume_state_path = make_resume_state_path(basename,ini,p2cfg.initial)
+    resume_state_path = make_resume_state_path(basename, ini, p2cfg.initial)
 
     if resume_state_path:
         u_raw_loaded, aux_loaded = load_state_file(
-         resume_state_path, expected_N=N, ms_mode=ms_mode
+            resume_state_path, expected_N=N, ms_mode=ms_mode
         )
         u_raw = u_raw_loaded
         aux_prev = aux_loaded
 
     else:
-
         if ini:  # set ini from cli
             if ini == "uniform":
                 mx, my, mz = 0.0, 0.0, 1.0
@@ -951,38 +971,56 @@ def step7_demag_sweep(
     last_MH_mu0 = None
 
     # --- print once before the field loop ---
-    if solver == 'lbfgs':
+    if solver == "lbfgs":
         _report_outer_params_host(
-            solver='lbfgs',
+            solver="lbfgs",
             ms_mode=ms_mode,
             gauge=(gauge if ms_mode == "A" else 0.0),
-            tol=a_tol, maxiter=a_maxiter,
-            nu_pre=a_nu_pre, nu_post=a_nu_post, omega=a_omega,
-            coarse_iters=a_coarse_iters, coarse_omega=a_coarse_omega,
+            tol=a_tol,
+            maxiter=a_maxiter,
+            nu_pre=a_nu_pre,
+            nu_post=a_nu_post,
+            omega=a_omega,
+            coarse_iters=a_coarse_iters,
+            coarse_omega=a_coarse_omega,
             eps_norm=1e-12,
-            outer_max_iter=lbfgs_it, grad_tol=grad_tol,
+            outer_max_iter=lbfgs_it,
+            grad_tol=grad_tol,
             history_size=lbfgs_history,
             debug_lbfgs=debug_lbfgs,
             H0_mode=h0_mode,
-            ls_init_mode=ls_init, ls_init_stepsize=ls_init_stepsize,
-            ls_max_stepsize=ls_max_stepsize, ls_increase_factor=ls_increase_factor,
-            ls_c1=ls_c1, ls_c2=ls_c2, ls_decrease=ls_decrease, ls_increase=ls_increase,
+            ls_init_mode=ls_init,
+            ls_init_stepsize=ls_init_stepsize,
+            ls_max_stepsize=ls_max_stepsize,
+            ls_increase_factor=ls_increase_factor,
+            ls_c1=ls_c1,
+            ls_c2=ls_c2,
+            ls_decrease=ls_decrease,
+            ls_increase=ls_increase,
             diag_u=diag_u,
         )
     else:
         _report_outer_params_host(
-            solver='bb',
+            solver="bb",
             ms_mode=ms_mode,
             gauge=(gauge if ms_mode == "A" else 0.0),
-            tol=a_tol, maxiter=a_maxiter,
-            nu_pre=a_nu_pre, nu_post=a_nu_post, omega=a_omega,
-            coarse_iters=a_coarse_iters, coarse_omega=a_coarse_omega,
+            tol=a_tol,
+            maxiter=a_maxiter,
+            nu_pre=a_nu_pre,
+            nu_post=a_nu_post,
+            omega=a_omega,
+            coarse_iters=a_coarse_iters,
+            coarse_omega=a_coarse_omega,
             eps_norm=1e-12,
-            outer_max_iter=lbfgs_it, grad_tol=grad_tol,  # 'lbfgs_it' reused as outer_max_iter for BB
-            bb_variant=bb_variant, debug_bb=debug_lbfgs,  # same debug flag reused
+            outer_max_iter=lbfgs_it,
+            grad_tol=grad_tol,  # 'lbfgs_it' reused as outer_max_iter for BB
+            bb_variant=bb_variant,
+            debug_bb=debug_lbfgs,  # same debug flag reused
             bb_init_steps=bb_init_steps,
-            ls_init_stepsize=ls_init_stepsize, ls_max_stepsize=ls_max_stepsize,
-            ls_c1=ls_c1, ls_decrease=ls_decrease,
+            ls_init_stepsize=ls_init_stepsize,
+            ls_max_stepsize=ls_max_stepsize,
+            ls_c1=ls_c1,
+            ls_decrease=ls_decrease,
         )
 
     # header for output
@@ -1005,95 +1043,99 @@ def step7_demag_sweep(
             [field.hx * hmag, field.hy * hmag, field.hz * hmag], dtype=jnp.float64
         )
 
-        if solver=='lbfgs':
-            E_norm, u_star, aux_star, parts_norm, alpha_out, metrics = minimize_energy_lbfgs(
-                initial_u_raw=u_raw,
-                initial_A=aux_prev,
-                A_t=amg.A_t,
-                P_t=amg.P_t,
-                R_t=amg.R_t,
-                Dinv_t=amg.Dinv_t,
-                L_c=amg.L_c,
-                conn=geom.conn,
-                grad_phi=geom.grad_phi,
-                volume=geom.volume,
-                mat_id=geom.mat_id,
-                Ms_lookup=materials.Ms_lookup,
-                A_lookup_exchange=materials.A_lookup_exchange,
-                K1_lookup=materials.K1_lookup,
-                k_easy_e=materials.k_easy_e,
-                H_ext=H_ext,
-                E_ref=E_ref,
-                tol=a_tol,
-                maxiter=a_maxiter,
-                nu_pre=a_nu_pre,
-                nu_post=a_nu_post,
-                omega=a_omega,
-                coarse_iters=a_coarse_iters,
-                coarse_omega=a_coarse_omega,
-                eps_norm=1e-12,
-                gauge=(gauge if ms_mode == "A" else 0.0),
-                ms_mode=ms_mode,
-                history_size=lbfgs_history,
-                outer_max_iter=lbfgs_it,
-                grad_tol=grad_tol,
-                debug_lbfgs=debug_lbfgs,
-                H0_mode=h0_mode,
-                ls_init_mode=ls_init,
-                ls_init_stepsize=alpha_prev,
-                ls_max_stepsize=ls_max_stepsize,
-                ls_increase_factor=ls_increase_factor,
-                ls_c1=ls_c1,
-                ls_c2=ls_c2,
-                ls_decrease=ls_decrease,
-                ls_increase=ls_increase,
-                diag_u=diag_u,
+        if solver == "lbfgs":
+            E_norm, u_star, aux_star, parts_norm, alpha_out, metrics = (
+                minimize_energy_lbfgs(
+                    initial_u_raw=u_raw,
+                    initial_A=aux_prev,
+                    A_t=amg.A_t,
+                    P_t=amg.P_t,
+                    R_t=amg.R_t,
+                    Dinv_t=amg.Dinv_t,
+                    L_c=amg.L_c,
+                    conn=geom.conn,
+                    grad_phi=geom.grad_phi,
+                    volume=geom.volume,
+                    mat_id=geom.mat_id,
+                    Ms_lookup=materials.Ms_lookup,
+                    A_lookup_exchange=materials.A_lookup_exchange,
+                    K1_lookup=materials.K1_lookup,
+                    k_easy_e=materials.k_easy_e,
+                    H_ext=H_ext,
+                    E_ref=E_ref,
+                    tol=a_tol,
+                    maxiter=a_maxiter,
+                    nu_pre=a_nu_pre,
+                    nu_post=a_nu_post,
+                    omega=a_omega,
+                    coarse_iters=a_coarse_iters,
+                    coarse_omega=a_coarse_omega,
+                    eps_norm=1e-12,
+                    gauge=(gauge if ms_mode == "A" else 0.0),
+                    ms_mode=ms_mode,
+                    history_size=lbfgs_history,
+                    outer_max_iter=lbfgs_it,
+                    grad_tol=grad_tol,
+                    debug_lbfgs=debug_lbfgs,
+                    H0_mode=h0_mode,
+                    ls_init_mode=ls_init,
+                    ls_init_stepsize=alpha_prev,
+                    ls_max_stepsize=ls_max_stepsize,
+                    ls_increase_factor=ls_increase_factor,
+                    ls_c1=ls_c1,
+                    ls_c2=ls_c2,
+                    ls_decrease=ls_decrease,
+                    ls_increase=ls_increase,
+                    diag_u=diag_u,
+                )
             )
         else:
-            E_norm, u_star, aux_star, parts_norm, alpha_out, metrics = minimize_energy_bb(
-                initial_u_raw=u_raw,
-                initial_A=aux_prev,
-                A_t=amg.A_t,
-                P_t=amg.P_t,
-                R_t=amg.R_t,
-                Dinv_t=amg.Dinv_t,
-                L_c=amg.L_c,
-                conn=geom.conn,
-                grad_phi=geom.grad_phi,
-                volume=geom.volume,
-                mat_id=geom.mat_id,
-                Ms_lookup=materials.Ms_lookup,
-                A_lookup_exchange=materials.A_lookup_exchange,
-                K1_lookup=materials.K1_lookup,
-                k_easy_e=materials.k_easy_e,
-                H_ext=H_ext,
-                E_ref=E_ref,
-                tol=a_tol,
-                maxiter=a_maxiter,
-                nu_pre=a_nu_pre,
-                nu_post=a_nu_post,
-                omega=a_omega,
-                coarse_iters=a_coarse_iters,
-                coarse_omega=a_coarse_omega,
-                eps_norm=1e-12,
-                gauge=(gauge if ms_mode == "A" else 0.0),
-                ms_mode=ms_mode,
-                outer_max_iter=lbfgs_it,      # reuse same CLI knob for iterations
-                grad_tol=grad_tol,            # reuse tol from CLI
-                bb_variant=bb_variant,        # or "bb1"/"bb2" if you prefer
-                debug_bb=debug_lbfgs,         # reuse debug flag
-                ls_init_stepsize=alpha_prev,
-                ls_max_stepsize=ls_max_stepsize,
-                ls_c1=ls_c1,
-                ls_decrease=ls_decrease,
-                bb_init_steps=bb_init_steps,
-            )        
+            E_norm, u_star, aux_star, parts_norm, alpha_out, metrics = (
+                minimize_energy_bb(
+                    initial_u_raw=u_raw,
+                    initial_A=aux_prev,
+                    A_t=amg.A_t,
+                    P_t=amg.P_t,
+                    R_t=amg.R_t,
+                    Dinv_t=amg.Dinv_t,
+                    L_c=amg.L_c,
+                    conn=geom.conn,
+                    grad_phi=geom.grad_phi,
+                    volume=geom.volume,
+                    mat_id=geom.mat_id,
+                    Ms_lookup=materials.Ms_lookup,
+                    A_lookup_exchange=materials.A_lookup_exchange,
+                    K1_lookup=materials.K1_lookup,
+                    k_easy_e=materials.k_easy_e,
+                    H_ext=H_ext,
+                    E_ref=E_ref,
+                    tol=a_tol,
+                    maxiter=a_maxiter,
+                    nu_pre=a_nu_pre,
+                    nu_post=a_nu_post,
+                    omega=a_omega,
+                    coarse_iters=a_coarse_iters,
+                    coarse_omega=a_coarse_omega,
+                    eps_norm=1e-12,
+                    gauge=(gauge if ms_mode == "A" else 0.0),
+                    ms_mode=ms_mode,
+                    outer_max_iter=lbfgs_it,  # reuse same CLI knob for iterations
+                    grad_tol=grad_tol,  # reuse tol from CLI
+                    bb_variant=bb_variant,  # or "bb1"/"bb2" if you prefer
+                    debug_bb=debug_lbfgs,  # reuse debug flag
+                    ls_init_stepsize=alpha_prev,
+                    ls_max_stepsize=ls_max_stepsize,
+                    ls_c1=ls_c1,
+                    ls_decrease=ls_decrease,
+                    bb_init_steps=bb_init_steps,
+                )
+            )
 
         if ls_pass_init:
             alpha_prev = float(alpha_out)
 
         total_outer_iters += int(metrics[0])
-        total_fun_evals  += int(metrics[1])
+        total_fun_evals += int(metrics[1])
         m_nodes = _m_from_u_raw(u_star)
         u_raw = m_nodes
 
@@ -1158,14 +1200,16 @@ def step7_demag_sweep(
                 _ = save_state_with_index(
                     basename=basename,
                     index=vtu_index,
-                    u_raw=u_raw,          # normalized m-nodes (the code sets u_raw = m_nodes)
-                    aux_star=aux_star,    # A_nodes (A) or U_nodes (U)
+                    u_raw=u_raw,  # normalized m-nodes (the code sets u_raw = m_nodes)
+                    aux_star=aux_star,  # A_nodes (A) or U_nodes (U)
                     ms_mode=ms_mode,
                 )
                 # Optional: print confirmation
                 # print(f"[Step 7] State written -> {_}")
             except Exception as _exc:
-                print(f"[warn] Could not write state file for index {vtu_index}: {_exc}")
+                print(
+                    f"[warn] Could not write state file for index {vtu_index}: {_exc}"
+                )
 
         # ---- Console output
 
@@ -1188,10 +1232,13 @@ def step7_demag_sweep(
 
     t_total = time.perf_counter() - t0
     print("\n[Report] Optimization summary")
-    print(f" method: {method_used.upper()}  (magnetostatics: {'U (scalar)' if ms_mode=='U' else 'A (vector)'})")
+    print(
+        f" method: {method_used.upper()}  (magnetostatics: {'U (scalar)' if ms_mode == 'U' else 'A (vector)'})"
+    )
     print(f" total wall time: {t_total:.3f} s")
     print(f" total function evaluations: {total_fun_evals}")
     print(f" total nonlinear iterations ({method_used}): {total_outer_iters}")
+
 
 # ---------------------------------- CLI --------------------------------------
 def main():
@@ -1271,12 +1318,12 @@ def main():
         help="Line-search initial step strategy (default: current)",
     )
     ap.add_argument(
-            "--ls-init-stepsize", type=float, default=None, 
-            help="Initial step size (default: 1 for lbfgs, 100.0 for bb)."
+        "--ls-init-stepsize",
+        type=float,
+        default=None,
+        help="Initial step size (default: 1 for lbfgs, 100.0 for bb).",
     )
-    ap.add_argument(
-        "--ls-pass-init", action="store_true"
-    )
+    ap.add_argument("--ls-pass-init", action="store_true")
     ap.add_argument(
         "--ls-max-stepsize", type=float, default=1.0e5, help="Maximum step size."
     )
@@ -1288,32 +1335,63 @@ def main():
     )
     ap.add_argument(
         "--ls-kind",
-        choices=["default", "armijo", "goldstein", "wolfe", "strong-wolfe", "curvilinear-armijo"],
+        choices=[
+            "default",
+            "armijo",
+            "goldstein",
+            "wolfe",
+            "strong-wolfe",
+            "curvilinear-armijo",
+        ],
         default="default",
         help=(
             "Line-search flavor for L-BFGS: 'default' keeps JAXopt's zoom Strong-Wolfe; "
             "otherwise use a backtracking line search with the chosen condition."
         ),
     )
-    ap.add_argument("--ls-c1", type=float, default=0.3,
-                    help="Line-search c1 (sufficient decrease) for backtracking LS.")
-    ap.add_argument("--ls-c2", type=float, default=0.7,
-                    help="Line-search c2 (curvature) for backtracking Wolfe/Strong-Wolfe.")
-    ap.add_argument("--ls-decrease", type=float, default=0.5,
-                    help="Backtracking decrease factor (shrink multiplier, in (0,1)).")
-    ap.add_argument("--ls-increase", type=float, default=2.0,
-                    help="Linesearch increase factor (expandion multiplier, > 1).")
     ap.add_argument(
-    "--solver",
-    choices=["lbfgs", "bb"],
-    default="lbfgs",
-    help="Outer minimizer: L-BFGS (two-loop) or Barzilai Borwein."
+        "--ls-c1",
+        type=float,
+        default=0.3,
+        help="Line-search c1 (sufficient decrease) for backtracking LS.",
     )
-    ap.add_argument("--bb-variant", choices=["alt","bb1","bb2"], default="alt",
-                    help="variant of Barzilai-Borwein method")
+    ap.add_argument(
+        "--ls-c2",
+        type=float,
+        default=0.7,
+        help="Line-search c2 (curvature) for backtracking Wolfe/Strong-Wolfe.",
+    )
+    ap.add_argument(
+        "--ls-decrease",
+        type=float,
+        default=0.5,
+        help="Backtracking decrease factor (shrink multiplier, in (0,1)).",
+    )
+    ap.add_argument(
+        "--ls-increase",
+        type=float,
+        default=2.0,
+        help="Linesearch increase factor (expandion multiplier, > 1).",
+    )
+    ap.add_argument(
+        "--solver",
+        choices=["lbfgs", "bb"],
+        default="lbfgs",
+        help="Outer minimizer: L-BFGS (two-loop) or Barzilai Borwein.",
+    )
+    ap.add_argument(
+        "--bb-variant",
+        choices=["alt", "bb1", "bb2"],
+        default="alt",
+        help="variant of Barzilai-Borwein method",
+    )
     ap.add_argument("--bb2-precond", action="store_true")
-    ap.add_argument("--bb-init-steps", type=int, default=2,
-                    help="initial number of linesearch steps")
+    ap.add_argument(
+        "--bb-init-steps",
+        type=int,
+        default=2,
+        help="initial number of linesearch steps",
+    )
     args = ap.parse_args()
 
     # Step 1
@@ -1502,7 +1580,7 @@ def main():
         if args.ls_init_stepsize:
             ls_init_stepsize = args.ls_init_stepsize
         else:
-            if args.solver=='bb':
+            if args.solver == "bb":
                 ls_init_stepsize = 100.0
             else:
                 ls_init_stepsize = 1.0
