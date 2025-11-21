@@ -941,7 +941,7 @@ def step7_demag_sweep(
     # resume_index + 1 for the next output.)
     resume_index = None
     if resume_state_path:
-        _m = _re.search(r"\.(\d{4})\.state\.npz$", str(resume_state_path))
+        _m = re.search(r"\.(\d{4})\.state\.npz$", str(resume_state_path))
         if _m:
             try:
                 resume_index = int(_m.group(1))
