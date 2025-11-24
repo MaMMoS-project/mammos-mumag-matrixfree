@@ -117,8 +117,6 @@ def _getfloat_relaxed(cfg, section, option, default=None):
             return default
 
 
-import re
-
 _INT_RX = re.compile(
     r"""
     [\-\+]?          # optional sign
