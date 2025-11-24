@@ -49,7 +49,7 @@ MU0 = 4 * math.pi * 1e-7             # H/m
 JS = 1.0                             # T
 KM = (JS * JS) / (2.0 * MU0)         # J/m^3
 
-EXAMPLE_NAME = "standard_problem_3"
+EXAMPLE_NAME = "standard_problem_2"
 
 # ---------- Run layout (strict to run_example.py) ----------
 
