@@ -936,7 +936,12 @@ def step7_demag_sweep(
         if ini:  # set ini from cli
             if ini == "uniform":
                 mx, my, mz = 0.0, 0.0, 1.0
-                u_raw = make_uniform_u_raw(N, InitialState(mx, my, mz), scale=1.0)
+                # InitialState dataclass requires an 'ini' field; when constructing
+                # a temporary InitialState for uniform initialization (CLI), set
+                # ini=0 as a sensible default.
+                u_raw = make_uniform_u_raw(
+                    N, InitialState(mx, my, mz, ini=0), scale=1.0
+                )
             elif ini == "vortex":
                 u_raw = make_vortex_yz(knt)
             else:
