@@ -74,8 +74,10 @@ def main():
 
     base = Path(".")
     initial_dir = base / "sensor_loop_initial_state"
-    down_dirs = {s: base / f"sensor_loop_only_down_case-{s}" for s in ("a", "b", "c")}
-    up_dirs = {s: base / f"sensor_loop_only_up_case-{s}" for s in ("a", "b", "c")}
+    # cases = ["a"]
+    cases = ["a", "b", "c"]
+    down_dirs = {s: base / f"sensor_loop_only_down_case-{s}" for s in cases}
+    up_dirs = {s: base / f"sensor_loop_only_up_case-{s}" for s in cases}
 
     initial_state_name = "sensor.0002.state.npz"
     down_result_state = "sensor.0006.state.npz"
@@ -104,14 +106,14 @@ def main():
     for s, ddir in down_dirs.items():
         copy_state(initial_dir, initial_state_name, ddir)
 
-    # # Steps 3-11: run down, copy result to up, run up for each case
-    # for s in ("a", "b", "c"):
-    #     ddir = down_dirs[s]
-    #     udir = up_dirs[s]
+    # Steps 3-11: run down, copy result to up, run up for each case
+    for s in cases:
+        ddir = down_dirs[s]
+        udir = up_dirs[s]
 
-    #     run_loop(ddir)
-    #     copy_state(ddir, down_result_state, udir)
-    #     run_loop(udir)
+        run_loop(ddir)
+        copy_state(ddir, down_result_state, udir)
+        run_loop(udir)
 
 
 if __name__ == "__main__":
