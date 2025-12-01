@@ -110,12 +110,12 @@ def plot_sensor_data_a(
     J_h_T = data[:, 2]  # J.h(T)
 
     # Compute x and y values
-    Hext_kA_m = Hext_T / mu0 / 1e3  # Convert to kA/m
+    Hext_kA_per_m = Hext_T / mu0 / 1e3  # Convert to kA/m
     M_over_Ms = (J_h_T / mu0) / Ms  # Compute M/Ms
 
     # Create the plot
     plt.figure()
-    plt.plot(Hext_kA_m, M_over_Ms, label="Simulation M/Ms vs Hext")
+    plt.plot(Hext_kA_per_m, M_over_Ms, label="Simulation M/Ms vs Hext")
 
     if Hs_in_kA_Per_m is not None:
         plt.plot(
@@ -163,13 +163,13 @@ def plot_sensor_data_b(
     J_h_T = data[:, 2]  # J.h(T)
 
     # Compute x and y values
-    Hext_kA_m = Hext_T / mu0 / 1e3  # Convert to kA/m
+    Hext_kA_per_m = Hext_T / mu0 / 1e3  # Convert to kA/m
     M_over_Ms = (J_h_T / mu0) / Ms  # Compute M/Ms
 
     # Create the plot
     plt.figure()
-    plt.plot(Hext_kA_m, M_over_Ms, color="C0", label="Simulation M/Ms vs Hext")
-    plt.plot(Hext_kA_m, M_over_Ms, color="C0", marker="+", markersize=5, alpha=0.5)
+    plt.plot(Hext_kA_per_m, M_over_Ms, color="C0", label="Simulation M/Ms vs Hext")
+    plt.plot(Hext_kA_per_m, M_over_Ms, color="C0", marker="+", markersize=5, alpha=0.5)
 
     if Hc45_in_kA_Per_m is not None:
         plt.plot(
@@ -197,18 +197,19 @@ def plot_sensor_data_b(
 # 2) fit a line to the windowed data,
 # 3) compute residuals against that fit, and
 # 4) keep points whose residual magnitude stays within `tolerance`.
+# TODO: Adopt to match "3. magnetic sensitivity: slope of linear fit to M(H) within -2.5 kA/m < H < 2.5 kA/m for sweep c) (case-c, hard axis)"
 def extract_linear_range(
     M_over_Ms: np.ndarray,
-    Hext_kA_m: np.ndarray,
-    tolerance: float = 0.02,
-    window_half_width: float = 1.0,
+    Hext_kA_per_m: np.ndarray,
+    tolerance: float = 0.2,
+    window_half_width_kA_per_m: float = 0.2,
     min_window_points: int = 5,
 ) -> Optional[dict]:
-    centered_mask = np.abs(Hext_kA_m) <= window_half_width
+    centered_mask = np.abs(Hext_kA_per_m) <= window_half_width_kA_per_m
     if np.count_nonzero(centered_mask) < min_window_points:
+        print("Not enough points in the centered window for linear fit.")
         return None
-
-    H_window = Hext_kA_m[centered_mask]
+    H_window = Hext_kA_per_m[centered_mask]
     M_window = M_over_Ms[centered_mask]
 
     slope, intercept = np.polyfit(H_window, M_window, 1)
@@ -217,13 +218,109 @@ def extract_linear_range(
 
     in_tolerance_mask = residuals <= tolerance
     if not np.any(in_tolerance_mask):
+        print("No points found within the specified tolerance for linearity.")
         return None
 
     return {
-        "Hext_kA_m": H_window[in_tolerance_mask],
+        "Hext_kA_per_m": H_window[in_tolerance_mask],
         "M_over_Ms": M_window[in_tolerance_mask],
         "fit_slope": slope,
         "fit_intercept": intercept,
+    }
+
+
+def extract_electrical_sensitivity(
+    data_file: Path,
+    field_window_kA_m: float = 2.5,
+    tmr_ratio: float = 1.0,
+    ra_kohm_um2: float = 1.0,
+    area_um2: float = 2.33,
+) -> Optional[dict]:
+    """Compute Item 4: slope of G(H) in the ±field_window band for sweep (c).
+
+    The conductance model follows MaMMoS Deliverable 6.2 (Sec. 3):
+        G = G0 * (1 + P^2 cos(theta)),
+    with P^2 = TMR / (2 + TMR) and G0 = 1 / (Rmin * (1 + P^2)).
+
+    Args:
+        data_file: concatenated .dat file for sweep (c).
+        field_window_kA_m: half-width of the linear fit window (default ±2.5 kA/m).
+        tmr_ratio: TMR ratio expressed as a unitless value (1.0 == 100%).
+        ra_kohm_um2: RA product in kΩ·μm² (default 1 kΩ·μm² from Table 2).
+        area_um2: sensor area in μm² (default 2.33 μm² from Table 2).
+
+    Returns:
+        dict with slope (dG/dH), intercept, windowed H/G arrays, residuals, and G0 metadata,
+        or None if insufficient data fall inside the requested field window.
+    """
+
+    data = np.loadtxt(data_file, skiprows=1)
+    if data.shape[1] < 6:
+        raise ValueError("Expected Jx/Jy/Jz columns in the .dat file.")
+
+    mu0 = 4 * np.pi * 1e-7  # T·m/A
+
+    Hext_T = data[:, 1]
+    Jx_T = data[:, 3]
+    Jy_T = data[:, 4]
+    Jz_T = data[:, 5]
+
+    Hext_kA_m = Hext_T / mu0 / 1e3
+
+    magnitude = np.sqrt(Jx_T**2 + Jy_T**2 + Jz_T**2)
+    magnitude = np.where(magnitude == 0.0, np.finfo(float).eps, magnitude)
+    cos_theta = Jy_T / magnitude  # reference layer magnetization along +y
+
+    if tmr_ratio < 0:
+        raise ValueError("TMR ratio must be non-negative.")
+    p_squared = tmr_ratio / (2.0 + tmr_ratio)
+
+    if area_um2 <= 0 or ra_kohm_um2 <= 0:
+        raise ValueError("RA product and area must be positive.")
+    Rmin_ohm = (ra_kohm_um2 / area_um2) * 1e3
+    G0 = 1.0 / (Rmin_ohm * (1.0 + p_squared))
+    conductance = G0 * (1.0 + p_squared * cos_theta)
+
+    field_mask = np.abs(Hext_kA_m) <= field_window_kA_m
+    if np.count_nonzero(field_mask) < 2:
+        return None
+
+    H_window = Hext_kA_m[field_mask]
+    G_window = conductance[field_mask]
+
+    slope, intercept = np.polyfit(H_window, G_window, 1)
+    fitted = slope * H_window + intercept
+    residuals = G_window - fitted
+
+    print("### Electrical sensitivity analysis results:")
+    print(f"Data file: {data_file}")
+    print(f"Points in field window: {H_window.size}")
+    print(f"Hext window (kA/m): {H_window.min():.4f} .. {H_window.max():.4f}")
+    print(f"Slope (dG/dH): {slope:.6e} S/(kA/m)")
+    print(f"Intercept (G_fit at H=0): {intercept:.6e} S")
+    print(f"Computed G0 (from RA/area/TMR): {G0:.6e} S")
+    print(f"P^2 used: {p_squared:.6e}")
+    print(f"Rmin (ohm): {Rmin_ohm:.6e}")
+    rmse = np.sqrt(np.mean(residuals**2))
+    max_abs_res = np.max(np.abs(residuals))
+    mean_res = np.mean(residuals)
+    print(
+        f"Residuals: mean={mean_res:.6e} S, rms={rmse:.6e} S, max_abs={max_abs_res:.6e} S"
+    )
+    # print()
+    # print("Index  H(kA/m)     G(S)            G_fit(S)        Residual(S)")
+    # for i, (h, g, f, r) in enumerate(zip(H_window, G_window, fitted, residuals)):
+    #     print(f"{i:3d}    {h:10.4f}   {g:12.6e}   {f:12.6e}   {r:12.6e}")
+    # print("### End of electrical sensitivity analysis results.")
+
+    return {
+        "slope": slope,
+        "intercept": intercept,
+        "Hext_kA_m": H_window,
+        "conductance": G_window,
+        "residuals": residuals,
+        "G0": G0,
+        "p_squared": p_squared,
     }
 
 
@@ -243,22 +340,23 @@ def plot_sensor_data_c(
     J_h_T = data[:, 2]  # J.h(T)
 
     # Compute x and y values
-    Hext_kA_m = Hext_T / mu0 / 1e3  # Convert to kA/m
+    Hext_kA_per_m = Hext_T / mu0 / 1e3  # Convert to kA/m
     M_over_Ms = (J_h_T / mu0) / Ms  # Compute M/Ms
 
-    linear_range = extract_linear_range(M_over_Ms, Hext_kA_m, tolerance=0.02)
+    linear_range = extract_linear_range(M_over_Ms, Hext_kA_per_m, tolerance=0.02)
 
     plt.figure()
-    plt.plot(Hext_kA_m, M_over_Ms, color="C0", label="Simulation M/Ms vs Hext")
+    plt.plot(Hext_kA_per_m, M_over_Ms, color="C0", label="Simulation M/Ms vs Hext")
+    plt.plot(Hext_kA_per_m, M_over_Ms, color="C0", marker="+", markersize=5, alpha=0.5)
 
     # TODO: test computation and plotting of linear range
     if linear_range:
-        H_min = np.min(linear_range["Hext_kA_m"])
-        H_max = np.max(linear_range["Hext_kA_m"])
-        window_mask = (Hext_kA_m >= H_min) & (Hext_kA_m <= H_max)
+        H_min = np.min(linear_range["Hext_kA_per_m"])
+        H_max = np.max(linear_range["Hext_kA_per_m"])
+        window_mask = (Hext_kA_per_m >= H_min) & (Hext_kA_per_m <= H_max)
         if np.count_nonzero(window_mask) >= 2:
             plt.plot(
-                Hext_kA_m[window_mask],
+                Hext_kA_per_m[window_mask],
                 M_over_Ms[window_mask],
                 color="C1",
                 linewidth=2.5,
@@ -298,4 +396,12 @@ plot_sensor_data_b(
 plot_sensor_data_c(
     Path("sensor_case-c.dat"),
     "hard-axis",
+)
+
+extract_electrical_sensitivity(
+    "sensor_case-c.dat",
+    field_window_kA_m=2.5,
+    tmr_ratio=1.0,
+    ra_kohm_um2=1.0,
+    area_um2=2.33,
 )
