@@ -46,12 +46,90 @@ def exchange_energy_and_grad(
 # ---------------------------------
 # Uniaxial anisotropy (value + grad)
 # ---------------------------------
+
+
+import jax
+import jax.numpy as jnp
+
+def orthorhombic_anisotropy_energy_and_grad_ip(
+    m_nodes: jnp.ndarray,  # (N, 3)
+    geom,                  # TetGeom: conn:(E,4); volume:(E,); mat_id:(E,)
+    K1_lookup: jnp.ndarray,    # (G,)
+    K1p_lookup: jnp.ndarray,   # (G,)
+):
+    """
+    Orthorhombic anisotropy energy and gradient using 4-point tetrahedral quadrature.
+    Eq. (2): e_ani = K1' * cos(2φ) * sin^2(θ) + K1 * sin^2(θ),
+    with θ from c-axis (z), φ from a-axis (x).
+    Vectorized and JIT-safe.
+    """
+    conn, Ve, mat_id = geom.conn, geom.volume, geom.mat_id
+    g_ids = mat_id - 1
+    K1_e = K1_lookup[g_ids]      # (E,)
+    K1p_e = K1p_lookup[g_ids]    # (E,)
+
+    # Gather nodal magnetization per element: (E, 4, 3)
+    m_e = m_nodes[conn]
+
+    # Quadrature: 4-point barycentric coords and weights
+    ip_bary = jnp.array([
+        [0.58541020, 0.13819660, 0.13819660, 0.13819660],
+        [0.13819660, 0.58541020, 0.13819660, 0.13819660],
+        [0.13819660, 0.13819660, 0.58541020, 0.13819660],
+        [0.13819660, 0.13819660, 0.13819660, 0.58541020],
+    ])  # (Q=4, 4)
+    ip_weights = jnp.array([0.25, 0.25, 0.25, 0.25])  # (Q,)
+
+    # Interpolate magnetization at integration points: (E, Q, 3)
+    m_ip = jnp.einsum('qa,eac->eqc', ip_bary, m_e)
+
+    mx, my, mz = m_ip[..., 0], m_ip[..., 1], m_ip[..., 2]
+    eps = 1e-12
+
+    # Compute sin^2(theta) and cos(2phi)
+    s = 1.0 - mz**2
+    rho = mx**2 + my**2 + eps
+    cos2 = (mx**2 - my**2) / rho
+
+    # Energy density at IP: (E, Q)
+    e_ip = K1p_e[:, None] * cos2 * s + K1_e[:, None] * s
+
+    # Total energy: sum over IP and elements
+    E = jnp.sum(Ve[:, None] * ip_weights[None, :] * e_ip)
+
+    # Gradients wrt m_ip
+    ds_dmz = -2.0 * mz
+    dcos2_dmx = 2.0 * mx * (2.0 * my**2 + eps) / (rho**2)
+    dcos2_dmy = -2.0 * my * (2.0 * mx**2 + eps) / (rho**2)
+
+    de_dmx = K1p_e[:, None] * (s * dcos2_dmx)
+    de_dmy = K1p_e[:, None] * (s * dcos2_dmy)
+    de_dmz = K1p_e[:, None] * (cos2 * ds_dmz) + K1_e[:, None] * ds_dmz
+
+    grad_ip = jnp.stack([de_dmx, de_dmy, de_dmz], axis=-1)  # (E, Q, 3)
+
+    # Distribute gradients to nodes using barycentric weights
+    contrib = (Ve[:, None, None, None] * ip_weights[None, :, None, None]) \
+              * ip_bary[None, :, :, None] * grad_ip[:, :, None, :]  # (E, Q, 4, 3)
+
+    # Sum over Q integration points
+    contrib_sum = jnp.sum(contrib, axis=1)  # (E, 4, 3)
+
+    # Assemble to global nodes
+    grad_m = jnp.zeros_like(m_nodes).at[conn].add(contrib_sum)
+
+    return E, grad_m
+
+
 def uniaxial_anisotropy_energy_and_grad(
     m_nodes: jnp.ndarray,    # (N, 3)
     geom: TetGeom,           # conn:(E,4), volume:(E,), mat_id:(E,)
     K1_lookup: jnp.ndarray,  # (G,)
     k_easy_e: jnp.ndarray,   # (E, 3) unit easy axis per element
 ):
+    K1p_lookup = jnp.array([0.091995e6,0.0])   # Ga4Mn8
+    return orthorhombic_anisotropy_energy_and_grad_ip(m_nodes,geom,K1_lookup,K1p_lookup)
+    '''
     conn, Ve, mat_id = geom.conn, geom.volume, geom.mat_id
     g_ids = mat_id - 1
     K1_e = K1_lookup[g_ids]                   # (E,)
@@ -69,7 +147,7 @@ def uniaxial_anisotropy_energy_and_grad(
     contrib = factor[..., None] * k_easy_e[:, None, :]   # (E,4,3)
     grad_m = jnp.zeros_like(m_nodes).at[conn].add(contrib)
     return E, grad_m
-
+    '''
 # ---------------------------------
 # Zeeman (uniform H) (value + grad)
 # ---------------------------------
