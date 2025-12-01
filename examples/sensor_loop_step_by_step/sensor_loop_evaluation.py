@@ -29,17 +29,17 @@ down_up_cases = [
     (
         "sensor_loop_only_down_case-a/sensor.dat",
         "sensor_loop_only_up_case-a/sensor.dat",
-        "sensor_a.dat",
+        "sensor_case-a.dat",
     ),
     (
         "sensor_loop_only_down_case-b/sensor.dat",
         "sensor_loop_only_up_case-b/sensor.dat",
-        "sensor_b.dat",
+        "sensor_case-b.dat",
     ),
     (
         "sensor_loop_only_down_case-c/sensor.dat",
         "sensor_loop_only_up_case-c/sensor.dat",
-        "sensor_c.dat",
+        "sensor_case-c.dat",
     ),
 ]
 
@@ -47,8 +47,8 @@ for down_file, up_file, output_file in down_up_cases:
     concatenate_sensor_data(Path(down_file), Path(up_file), Path(output_file))
 
 
-# Step 13: Plot the results from "./sensor_a.dat", "./sensor_b.dat", "./sensor_c.dat" into
-# three matplotlib figures called sensor_a, sensor_b, sensor_c where the columns are:
+# Step 13: Plot the results from "./sensor_case-a.dat", "./sensor_case-b.dat", "./sensor_case-c.dat" into
+# three matplotlib figures called sensor_case-a, sensor_case-b, sensor_case-c where the columns are:
 # the x-axis is "Hext in (kA/m)" computed from the column in the .dat files called "mu0 Hext(T)" which is devided by mu0 = 4pi * 10**-7 and converted to kA/m
 # the y-axis is "M/Ms" computed from the column in the .dat files called "J.h(T)" devided by mu0. After that this value is devided by Ms which is 800e3 A/m for the sensor example
 
@@ -132,9 +132,9 @@ def plot_sensor_data_a(
     plt.legend()
     plt.grid()
     plt.xlim(-15, 15)
-    plt.savefig(f"{figure_name}.png", dpi=300)
+    plt.savefig(f"sensor_case-a-{figure_name}.png", dpi=300)
     plt.close()
-    print(f"Plot saved as {figure_name}.png")
+    print(f"Plot saved as sensor_case-a-{figure_name}.png")
 
 
 def plot_sensor_data_b(
@@ -186,9 +186,9 @@ def plot_sensor_data_b(
     plt.legend()
     plt.grid()
     plt.xlim(-15, 15)
-    plt.savefig(f"{figure_name}.png", dpi=300)
+    plt.savefig(f"sensor_case-b-{figure_name}.png", dpi=300)
     plt.close()
-    print(f"Plot saved as {figure_name}.png")
+    print(f"Plot saved as sensor_case-b-{figure_name}.png")
 
 
 # Estimate linear range around Hext=0 using tolerance value
@@ -277,23 +277,25 @@ def plot_sensor_data_c(
     plt.legend()
     plt.grid()
     plt.xlim(-15, 15)
-    plt.savefig(f"{figure_name}.png", dpi=300)
+    plt.savefig(f"sensor_case-c-{figure_name}.png", dpi=300)
     plt.close()
-    print(f"Plot saved as {figure_name}.png")
+    print(f"Plot saved as sensor_case-c-{figure_name}.png")
 
 
 # Plot for case-a
 plot_sensor_data_a(
-    Path("sensor_a.dat"), "easy-axis", Path("sensor_loop_only_up_case-a/sensor.dat")
+    Path("sensor_case-a.dat"),
+    "easy-axis",
+    Path("sensor_loop_only_up_case-a/sensor.dat"),
 )
 
 # Plot for case-b
 plot_sensor_data_b(
-    Path("sensor_b.dat"), "45deg", Path("sensor_loop_only_up_case-b/sensor.dat")
+    Path("sensor_case-b.dat"), "45deg", Path("sensor_loop_only_up_case-b/sensor.dat")
 )
 
 # Plot for case-c
 plot_sensor_data_c(
-    Path("sensor_c.dat"),
+    Path("sensor_case-c.dat"),
     "hard-axis",
 )
