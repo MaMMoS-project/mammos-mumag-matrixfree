@@ -29,11 +29,13 @@ Dependencies:
 
 from __future__ import annotations
 import argparse
-import sys
 from pathlib import Path
 from typing import Tuple, List, Dict, Optional, Union
 import numpy as np
 from scipy.spatial import Delaunay
+import os
+import sys
+import shutil
 
 # Optional: visualization
 try:
@@ -1144,6 +1146,8 @@ def run_single_solid_mesher(
     out_name: Optional[str] = "single_solid",
     out_data_name: Optional[str] = None,  # overrides .npz base name
     out_vis_name: Optional[str] = None,  # overrides .vtu base name
+    number_of_grains=1,
+    seed=123,
     no_vis: bool = False,
     verbose: bool = False,
     return_arrays: bool = True,  # NEW: set False to minimize memory
@@ -1183,9 +1187,9 @@ def run_single_solid_mesher(
     # TODO: include the geometry for a elliptic_cylinder shape as option next to box, eye and ellipsoid. adopt it to the current structure.
 
     # Dispatch geometry + backend
-    if geom not in ("box", "ellipsoid", "eye", "elliptic_cylinder"):
+    if geom not in ("box", "ellipsoid", "eye", "elliptic_cylinder", "poly"):
         raise ValueError(
-            "geom must be 'box' or 'ellipsoid' or 'eye' or 'elliptic_cylinder'"
+            "geom must be 'box' or 'ellipsoid' or 'eye' or 'elliptic_cylinder' or 'poly'"
         )
     if backend not in ("meshpy", "grid"):
         raise ValueError("backend must be 'meshpy' or 'grid'")
@@ -1291,6 +1295,17 @@ def run_single_solid_mesher(
                 verbose=bool(verbose),
             )
 
+    elif geom == "poly":
+        if isinstance(extent, str):
+            Lx, Ly, Lz = parse_csv3(extent)
+        else:
+            Lx, Ly, Lz = float(extent[0]), float(extent[1]), float(extent[2])
+        knt, ijk = mesh_backend_neper_poly(n=int(number_of_grains), 
+                                           seed=int(seed), 
+                                           size_x=Lx, size_y=Ly, size_z=Lz,
+                                           h=float(h))
+
+
     # Resolve output filenames
     base = (out_name or "single_solid").strip()
     data_name = out_data_name or base
@@ -1326,6 +1341,104 @@ def run_single_solid_mesher(
         return knt, ijk, out_npz, out_vtu
 
 
+
+def find_gmsh_path() -> str | None:
+    """
+    Attempt to locate the gmsh executable.
+    """
+    gmsh = shutil.which("gmsh")
+    if gmsh:
+        return gmsh
+
+
+def mesh_backend_neper_poly(n: int, seed: int, size_x: float, size_y: float, size_z: float, h: float):
+    import subprocess, sys
+    # 1) Generate tessellation
+    cmd_tess = ["neper", "-T", "-n", str(n), "-id", str(seed),
+                "-morpho", "gg",
+                "-morphooptistop", "val=1e-2",
+                "-domain", f"cube({size_x},{size_y},{size_z}):translate({-size_x/2},{-size_y/2},{-size_z/2})",
+                "-reg", "1"]
+    subprocess.run(cmd_tess, check=True)
+
+    # Optional preview (kept as-is)
+    cmd_vis = ["neper", "-V", f"n{n}-id{seed}.tess", "-datacellcol", "id", "-print", f"n{n}-id{seed}"]
+    subprocess.run(cmd_vis, check=True)
+
+    # 2) Mesh tessellation
+    cmd_mesh = ["neper", "-M", f"n{n}-id{seed}.tess", "-cl", f"{h}", "-format", "vtk"]
+    subprocess.run(cmd_mesh, check=True)
+
+    # 3) Load VTK and propagate grain IDs
+    vtk_path = f"n{n}-id{seed}.vtk"
+    mesh = meshio.read(vtk_path)
+
+    knt  = mesh.points
+    tets = mesh.cells_dict.get("tetra")
+    if tets is None:
+        raise RuntimeError("No tetra cells found in Neper output VTK.")
+
+    # Try to find a per-tetra cell-data array to use as material/grain IDs.
+    mat = None
+    # Prefer the cell_data_dict (present in modern meshio versions)
+    try:
+        cd_tet = mesh.cell_data_dict.get("tetra", {})
+        for key in ("matids", "mat_id", "poly", "grain", "gmsh:physical", "material", "region", "domain"):
+            if key in cd_tet:
+                mat = np.asarray(cd_tet[key], dtype=np.int32).ravel()
+                break
+    except Exception:
+        pass
+
+    # Fallback: inspect mesh.cell_data (older meshio layout)
+    if mat is None and hasattr(mesh, "cell_data"):
+        for key, data_list in mesh.cell_data.items():
+            # Each data_list aligns with mesh.cells blocks
+            for cell_block, data in zip(mesh.cells, data_list):
+                if getattr(cell_block, "type", getattr(cell_block, "type", None)) == "tetra":
+                    mat = np.asarray(data, dtype=np.int32).ravel()
+                    break
+            if mat is not None:
+                break
+
+    # Last resort: all ones (warn)
+    if mat is None:
+        print("[warn] No per-tetra cell data found in Neper VTK; defaulting mat_id=1.", file=sys.stderr)
+        mat = np.ones((tets.shape[0],), dtype=np.int32)
+
+    # Build ijk (E,5): 4 indices + mat_id
+    ijk = np.column_stack([tets, mat])
+
+    return knt, ijk
+
+
+'''
+def mesh_backend_neper_poly(n: int, seed: int, size_x: float, size_y: float, size_z: float, h: float):
+    import subprocess
+    # 1) Generate tessellation
+    cmd_tess = ["neper", "-T", "-n", str(n), "-id", str(seed), 
+                "-morpho", "gg",
+                "-morphooptistop", "val=1e-2",
+                "-domain", f"cube({size_x},{size_y},{size_z}):translate({-size_x/2},{-size_y/2},{-size_z/2})", 
+                "-reg", "1"]
+    subprocess.run(cmd_tess, check=True)
+    cmd_vis = ["neper", "-V", f"n{n}-id{seed}.tess", "-datacellcol", "id","-print", f"n{n}-id{seed}"]
+    subprocess.run(cmd_vis, check=True)
+
+    # 2) Mesh tessellation
+    gmsh_path = find_gmsh_path()
+    cmd_mesh = ["neper", "-M",  f"n{n}-id{seed}.tess",
+                "-cl", f"{h}", "-format", "vtk"]
+    subprocess.run(cmd_mesh, check=True)
+
+    # 3) Load mesh (VTK) and convert to numpy arrays
+    import meshio
+    mesh = meshio.read(f"n{n}-id{seed}.vtk")
+    knt = mesh.points
+    tets = mesh.cells_dict.get("tetra")
+    ijk = np.hstack([tets, np.ones((tets.shape[0], 1), dtype=np.int32)])
+    return knt, ijk
+'''
 # ------------------------------- CLI -------------------------------
 
 
@@ -1337,8 +1450,8 @@ def main():
         "--geom",
         type=str,
         default="box",
-        choices=["box", "ellipsoid", "eye", "elliptic_cylinder"],
-        help="Select geometry: parallelepiped (box), ellipsoid (symmetry axis is local z), eye, or elliptic_cylinder (extruded ellipse).",
+        choices=["box", "ellipsoid", "eye", "elliptic_cylinder", "poly"],
+        help="Select geometry: parallelepiped (box), ellipsoid (symmetry axis is local z), eye, elliptic_cylinder (extruded ellipse), poly (polyhedral grains)",
     )
     ap.add_argument(
         "--extent",
@@ -1391,6 +1504,11 @@ def main():
     #     help="Force use of the grid backend even if meshpy is installed.",
     # )
 
+
+    ap.add_argument("--n", type=int, default=10, help="Number of grains for polyhedral tessellation")
+    ap.add_argument("--id", type=int, default=1, help="Random seed for tessellation")
+
+
     # Output naming
     ap.add_argument(
         "--out-name",
@@ -1433,6 +1551,8 @@ def main():
             out_name=args.out_name,
             out_data_name=args.out_data_name,
             out_vis_name=args.out_vis_name,
+            number_of_grains=args.n,
+            seed=args.id,
             no_vis=bool(args.no_vis),
             verbose=bool(args.verbose),
             # CLI uses default (return_arrays=True). For memory-lean CLI, we could add a flag.

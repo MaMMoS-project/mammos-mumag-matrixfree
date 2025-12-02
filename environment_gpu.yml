@@ -1,6 +1,8 @@
 name: mfree-mumag-gpu
 channels:
+  - set3mah
   - conda-forge
+channel_priority: strict    
 dependencies:
   - python
   - numpy
@@ -9,6 +11,8 @@ dependencies:
   - pyamg
   - meshio
   - meshpy
+  - neper
+  - povray
   - pip
   - pip:
       - jax[cuda12]
