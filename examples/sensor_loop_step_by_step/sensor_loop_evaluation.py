@@ -339,7 +339,7 @@ def plot_sensor_data_b(
 
 def extract_linear_range(
     M_over_Ms: np.ndarray,
-    Hext_kA_m: np.ndarray,
+    Hext_kA_per_m: np.ndarray,
     *,
     G_over_Ms: Optional[np.ndarray] = None,
     window_half_width: float = 2.5,
@@ -368,7 +368,7 @@ def extract_linear_range(
 
     Args:
         M_over_Ms: Normalized magnetization values (projection along applied field)
-        Hext_kA_m: Applied field values in kA/m
+        Hext_kA_per_m: Applied field values in kA/m
         G_over_Ms: Optional normalized x-component magnetization G(H) = Mx/(μ₀·Ms)
             for electrical sensitivity computation (pinned layer along +x easy axis)
         window_half_width: Half-width of the symmetric fit window around H=0
@@ -377,7 +377,7 @@ def extract_linear_range(
     Returns:
         Dict with fit parameters and residuals, or None if insufficient samples.
     """
-    centered_mask = np.abs(Hext_kA_m) <= window_half_width
+    centered_mask = np.abs(Hext_kA_per_m) <= window_half_width
     if np.count_nonzero(centered_mask) < min_window_points:
         print("Not enough points in the centered window for linear fit.")
         return None
@@ -417,7 +417,7 @@ def extract_linear_range(
 
 def extract_electrical_sensitivity(
     data_file: Path,
-    field_window_kA_m: float = 2.5,
+    field_window_kA_per_m: float = 2.5,
     tmr_ratio: float = 1.0,
     ra_kohm_um2: float = 1.0,
     area_um2: float = 2.33,
@@ -430,7 +430,7 @@ def extract_electrical_sensitivity(
 
     Args:
         data_file: concatenated .dat file for sweep (c).
-        field_window_kA_m: half-width of the linear fit window (default ±2.5 kA/m).
+        field_window_kA_per_m: half-width of the linear fit window (default ±2.5 kA/m).
         tmr_ratio: TMR ratio expressed as a unitless value (1.0 == 100%).
         ra_kohm_um2: RA product in kΩ·μm² (default 1 kΩ·μm² from Table 2).
         area_um2: sensor area in μm² (default 2.33 μm² from Table 2).
@@ -451,7 +451,7 @@ def extract_electrical_sensitivity(
     Jy_T = data[:, 4]
     Jz_T = data[:, 5]
 
-    Hext_kA_m = Hext_T / mu0 / 1e3
+    Hext_kA_per_m = Hext_T / mu0 / 1e3
 
     magnitude = np.sqrt(Jx_T**2 + Jy_T**2 + Jz_T**2)
     magnitude = np.where(magnitude == 0.0, np.finfo(float).eps, magnitude)
@@ -467,11 +467,11 @@ def extract_electrical_sensitivity(
     G0 = 1.0 / (Rmin_ohm * (1.0 + p_squared))
     conductance = G0 * (1.0 + p_squared * cos_theta)
 
-    field_mask = np.abs(Hext_kA_m) <= field_window_kA_m
+    field_mask = np.abs(Hext_kA_per_m) <= field_window_kA_per_m
     if np.count_nonzero(field_mask) < 2:
         return None
 
-    H_window = Hext_kA_m[field_mask]
+    H_window = Hext_kA_per_m[field_mask]
     G_window = conductance[field_mask]
 
     slope, intercept = np.polyfit(H_window, G_window, 1)
@@ -502,7 +502,7 @@ def extract_electrical_sensitivity(
     return {
         "slope": slope,
         "intercept": intercept,
-        "Hext_kA_m": H_window,
+        "Hext_kA_per_m": H_window,
         "conductance": G_window,
         "residuals": residuals,
         "G0": G0,
@@ -567,7 +567,7 @@ def plot_sensor_data_c(
     Jx_T = data[:, 3]  # Magnetization component along x (easy axis direction) [T]
 
     # Convert to physical units
-    Hext_kA_m = Hext_T / mu0 / 1e3  # External field [kA/m]
+    Hext_kA_per_m = Hext_T / mu0 / 1e3  # External field [kA/m]
     M_over_Ms = (J_h_T / mu0) / Ms  # Normalized magnetization along applied field
 
     # Electrical sensitivity using simplified form: G(H) = Mx / (μ₀ · Ms)
@@ -587,7 +587,7 @@ def plot_sensor_data_c(
     # Compute benchmark sensitivities on the fixed ±window_half_width interval
     linear_metrics = extract_linear_range(
         M_over_Ms,
-        Hext_kA_m,
+        Hext_kA_per_m,
         G_over_Ms=G_over_Ms,
         window_half_width=window_half_width,
         min_window_points=min_window_points,
@@ -595,8 +595,8 @@ def plot_sensor_data_c(
 
     # Generate plot
     plt.figure(figsize=(10, 6))
-    plt.plot(Hext_kA_m, M_over_Ms, "C0-", linewidth=1.5, label="Hysteresis loop")
-    plt.plot(Hext_kA_m, M_over_Ms, "C0+", markersize=4, alpha=0.6, label="Data points")
+    plt.plot(Hext_kA_per_m, M_over_Ms, "C0-", linewidth=1.5, label="Hysteresis loop")
+    plt.plot(Hext_kA_per_m, M_over_Ms, "C0+", markersize=4, alpha=0.6, label="Data points")
 
     plt.axvspan(
         -window_half_width,
