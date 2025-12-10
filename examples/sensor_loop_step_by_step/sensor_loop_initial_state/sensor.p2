@@ -2,16 +2,16 @@
 size = 1.0e-6
 
 [initial state]
-mx = 0.01
-my = 1
+mx = 0.
+my = 1.
 mz = 0.
 
 [field]
-hstart = 0.0125
-hfinal = 0
-hstep = -0.003
+hstart = 0.0314
+hfinal = 0.
+hstep = -0.00025
 
-hx = 1; 
+hx = 1. 
 hy = 0.
 hz = 0.
 
@@ -19,5 +19,5 @@ mstep = 0.1
 mfinal = -1.0
 
 [minimizer] 
-tol_fun = 1e-7
+tol_fun = 1e-10
 
