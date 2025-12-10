@@ -130,7 +130,7 @@ def concatenate_sensor_data(down_file: Path, up_file: Path, output_file: Path) -
 
 
 def find_in_up_M_over_Ms_near_value(
-    data_file: Path, value=1.0, tolerance=0.01, Ms_in_A_Per_m=800e3
+    data_file: Path, value=1.0, tolerance=0.05, Ms_in_A_Per_m=800e3
 ) -> tuple[float, float] | tuple[None, None]:
     """Find applied field Hs where M/Ms crosses a target value within tolerance.
 
@@ -141,7 +141,7 @@ def find_in_up_M_over_Ms_near_value(
     Args:
         data_file: Path to data file containing Hext and M/Ms columns
         value: Target M/Ms value to search for (default: 1.0 for saturation)
-        tolerance: Acceptable deviation from target value (default: 0.01)
+        tolerance: Acceptable deviation from target value (default: 0.05)
         Ms_in_A_Per_m: Saturation magnetization in A/m (default: 800e3 for sensor example)
 
     Returns:
@@ -192,13 +192,14 @@ def plot_sensor_data_a(
 
     # Load data from the file
     data = np.loadtxt(data_file, skiprows=1)
+    Ms_in_A_Per_m=800e3
 
     # Detect saturation field in up-sweep
     Hs_in_kA_Per_m = None
     M_over_Ms_value = None
     if original_data_file.is_file():
         Hs_in_kA_Per_m, M_over_Ms_value = find_in_up_M_over_Ms_near_value(
-            original_data_file, value=1.0, tolerance=0.01
+            original_data_file, value=1.0, tolerance=0.05, Ms_in_A_Per_m=Ms_in_A_Per_m
         )
         if Hs_in_kA_Per_m is not None:
             print(
@@ -211,15 +212,14 @@ def plot_sensor_data_a(
 
     # Constants
     mu0 = 4 * np.pi * 1e-7  # T·m/A
-    Ms = 800e3  # A/m
-
+    
     # Extract columns
     Hext_T = data[:, 1]  # mu0 Hext(T)
     J_h_T = data[:, 2]  # J.h(T)
 
     # Compute x and y values
     Hext_kA_per_m = Hext_T / mu0 / 1e3  # Convert to kA/m
-    M_over_Ms = (J_h_T / mu0) / Ms  # Compute M/Ms
+    M_over_Ms = (J_h_T / mu0) / Ms_in_A_Per_m  # Compute M/Ms
 
     # Generate plot
     plt.figure(figsize=(10, 6))
@@ -276,13 +276,14 @@ def plot_sensor_data_b(
 
     # Load data from the file
     data = np.loadtxt(data_file, skiprows=1)
+    Ms_in_A_Per_m = 800e3  # A/m
 
     # Detect coercivity (field at M/Ms = 0) in up-sweep
     Hc45_in_kA_Per_m = None
     M_over_Ms_value = None
     if original_data_file.is_file():
         Hc45_in_kA_Per_m, M_over_Ms_value = find_in_up_M_over_Ms_near_value(
-            original_data_file, value=0.0, tolerance=0.1
+            original_data_file, value=0.0, tolerance=0.05, Ms_in_A_Per_m=Ms_in_A_Per_m
         )
         if Hc45_in_kA_Per_m is not None:
             print(
@@ -295,15 +296,14 @@ def plot_sensor_data_b(
 
     # Constants
     mu0 = 4 * np.pi * 1e-7  # T·m/A
-    Ms = 800e3  # A/m
-
+    
     # Extract columns
     Hext_T = data[:, 1]  # mu0 Hext(T)
     J_h_T = data[:, 2]  # J.h(T)
 
     # Compute x and y values
     Hext_kA_per_m = Hext_T / mu0 / 1e3  # Convert to kA/m
-    M_over_Ms = (J_h_T / mu0) / Ms  # Compute M/Ms
+    M_over_Ms = (J_h_T / mu0) / Ms_in_A_Per_m  # Compute M/Ms
 
     # Generate plot
     plt.figure(figsize=(10, 6))
@@ -700,6 +700,12 @@ Examples:
         metavar="NAME",
         help="Descriptive name for plot title (default: custom)",
     )
+    parser.add_argument(
+        "--reference-file",
+        type=Path,
+        metavar="FILE",
+        help="Up-sweep-only data file for saturation detection (default: same as --plot-a)",
+    )
     
     args = parser.parse_args()
 
@@ -726,6 +732,9 @@ Examples:
         # Determine xlim
         plot_xlim = tuple(args.xlim) if args.xlim else (-15, 15)
         
+        # Determine reference file for saturation detection
+        reference_file = args.reference_file if args.reference_file else data_file
+        
         print("=" * 80)
         print("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case a)")
         print("=" * 80)
@@ -739,7 +748,7 @@ Examples:
         plot_sensor_data_a(
             data_file=data_file,
             figure_name=args.figure_name,
-            original_data_file=data_file,  # Use same file for saturation detection
+            original_data_file=reference_file,  # Use reference file for saturation detection
             output_file_path=output_dir,
             xlim=plot_xlim,
             logger=logger,
