@@ -2,15 +2,15 @@
 size = 1e-6
 
 [initial state]
-mx = 0.01
-my = 1
+mx = 0.
+my = 1.
 mz = 0.
 ini = 6
 
 [field]
 hstart = -0.0314159
 hfinal =  0.0314159
-hstep = 0.00005
+hstep = 0.00025
 
 hx = 1.414
 hy = 1.414
