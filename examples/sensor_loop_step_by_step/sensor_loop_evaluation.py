@@ -37,6 +37,7 @@ Benchmark metrics (±2.5 kA/m window):
 
 from typing import Optional
 from pathlib import Path
+import argparse
 import logging
 import sys
 
@@ -220,16 +221,10 @@ def plot_sensor_data_a(
     Hext_kA_per_m = Hext_T / mu0 / 1e3  # Convert to kA/m
     M_over_Ms = (J_h_T / mu0) / Ms  # Compute M/Ms
 
-<<<<<<< HEAD
-    # Create the plot
-    plt.figure()
-    plt.plot(Hext_kA_per_m, M_over_Ms, label="Simulation M/Ms vs Hext")
-=======
     # Generate plot
     plt.figure(figsize=(10, 6))
-    plt.plot(Hext_kA_m, M_over_Ms, "C0-", linewidth=1.5, label="Hysteresis loop")
-    plt.plot(Hext_kA_m, M_over_Ms, "C0+", markersize=4, alpha=0.6, label="Data points")
->>>>>>> 01af158 (update to run fine and coarse mesh and creat .log files add slurm output)
+    plt.plot(Hext_kA_per_m, M_over_Ms, "C0-", linewidth=1.5, label="Hysteresis loop")
+    plt.plot(Hext_kA_per_m, M_over_Ms, "C0+", markersize=4, alpha=0.6, label="Data points")
 
     # Highlight saturation point if found
     if Hs_in_kA_Per_m is not None:
@@ -310,17 +305,10 @@ def plot_sensor_data_b(
     Hext_kA_per_m = Hext_T / mu0 / 1e3  # Convert to kA/m
     M_over_Ms = (J_h_T / mu0) / Ms  # Compute M/Ms
 
-<<<<<<< HEAD
-    # Create the plot
-    plt.figure()
-    plt.plot(Hext_kA_per_m, M_over_Ms, color="C0", label="Simulation M/Ms vs Hext")
-    plt.plot(Hext_kA_per_m, M_over_Ms, color="C0", marker="+", markersize=5, alpha=0.5)
-=======
     # Generate plot
     plt.figure(figsize=(10, 6))
-    plt.plot(Hext_kA_m, M_over_Ms, "C0-", linewidth=1.5, label="Hysteresis loop")
-    plt.plot(Hext_kA_m, M_over_Ms, "C0+", markersize=4, alpha=0.6, label="Data points")
->>>>>>> 01af158 (update to run fine and coarse mesh and creat .log files add slurm output)
+    plt.plot(Hext_kA_per_m, M_over_Ms, "C0-", linewidth=1.5, label="Hysteresis loop")
+    plt.plot(Hext_kA_per_m, M_over_Ms, "C0+", markersize=4, alpha=0.6, label="Data points")
 
     # Highlight coercivity point if found
     if Hc45_in_kA_Per_m is not None:
@@ -349,23 +337,6 @@ def plot_sensor_data_b(
     print(f"  [PLOT] Saved: {save_path.name}")
 
 
-<<<<<<< HEAD
-# Estimate linear range around Hext=0 using tolerance value
-# Steps:
-# 1) window points close to Hext=0,
-# 2) fit a line to the windowed data,
-# 3) compute residuals against that fit, and
-# 4) keep points whose residual magnitude stays within `tolerance`.
-# TODO: Adopt to match "3. magnetic sensitivity: slope of linear fit to M(H) within -2.5 kA/m < H < 2.5 kA/m for sweep c) (case-c, hard axis)"
-def extract_linear_range(
-    M_over_Ms: np.ndarray,
-    Hext_kA_per_m: np.ndarray,
-    tolerance: float = 0.2,
-    window_half_width_kA_per_m: float = 0.2,
-    min_window_points: int = 5,
-) -> Optional[dict]:
-    centered_mask = np.abs(Hext_kA_per_m) <= window_half_width_kA_per_m
-=======
 def extract_linear_range(
     M_over_Ms: np.ndarray,
     Hext_kA_m: np.ndarray,
@@ -407,7 +378,6 @@ def extract_linear_range(
         Dict with fit parameters and residuals, or None if insufficient samples.
     """
     centered_mask = np.abs(Hext_kA_m) <= window_half_width
->>>>>>> 01af158 (update to run fine and coarse mesh and creat .log files add slurm output)
     if np.count_nonzero(centered_mask) < min_window_points:
         print("Not enough points in the centered window for linear fit.")
         return None
@@ -419,18 +389,6 @@ def extract_linear_range(
     m_residuals = M_window - m_fit
     non_linearity = float(np.max(np.abs(m_residuals)))
 
-<<<<<<< HEAD
-    in_tolerance_mask = residuals <= tolerance
-    if not np.any(in_tolerance_mask):
-        print("No points found within the specified tolerance for linearity.")
-        return None
-
-    return {
-        "Hext_kA_per_m": H_window[in_tolerance_mask],
-        "M_over_Ms": M_window[in_tolerance_mask],
-        "fit_slope": slope,
-        "fit_intercept": intercept,
-=======
     result: dict = {
         "H_window": H_window,
         "M_window": M_window,
@@ -439,7 +397,6 @@ def extract_linear_range(
         "magnetic_fit": m_fit,
         "magnetic_residuals": m_residuals,
         "non_linearity": non_linearity,
->>>>>>> 01af158 (update to run fine and coarse mesh and creat .log files add slurm output)
     }
 
     if G_over_Ms is not None:
@@ -600,30 +557,6 @@ def plot_sensor_data_c(
     P2 = TMR / (2.0 + TMR)  # Polarization factor P²
     G0 = 1.0 / (Rmin * (1.0 + P2))  # Baseline conductance [S]
 
-<<<<<<< HEAD
-    # Compute x and y values
-    Hext_kA_per_m = Hext_T / mu0 / 1e3  # Convert to kA/m
-    M_over_Ms = (J_h_T / mu0) / Ms  # Compute M/Ms
-
-    linear_range = extract_linear_range(M_over_Ms, Hext_kA_per_m, tolerance=0.02)
-
-    plt.figure()
-    plt.plot(Hext_kA_per_m, M_over_Ms, color="C0", label="Simulation M/Ms vs Hext")
-    plt.plot(Hext_kA_per_m, M_over_Ms, color="C0", marker="+", markersize=5, alpha=0.5)
-
-    # TODO: test computation and plotting of linear range
-    if linear_range:
-        H_min = np.min(linear_range["Hext_kA_per_m"])
-        H_max = np.max(linear_range["Hext_kA_per_m"])
-        window_mask = (Hext_kA_per_m >= H_min) & (Hext_kA_per_m <= H_max)
-        if np.count_nonzero(window_mask) >= 2:
-            plt.plot(
-                Hext_kA_per_m[window_mask],
-                M_over_Ms[window_mask],
-                color="C1",
-                linewidth=2.5,
-                label="Linear window (|residual| ≤ tol)",
-=======
     # Note: Full TMR formula is G(H) = G₀ (1 + P² cos θ)
     # For benchmark electrical sensitivity, we use the normalized form Mx/Ms = cos(θ)
     # which captures the field-dependent behavior independent of device resistance
@@ -696,7 +629,6 @@ def plot_sensor_data_c(
         if "electrical_sensitivity" in linear_metrics:
             print(
                 f"  [ANALYSIS] Case {figure_name}: Electrical sensitivity (|H| ≤ {window_half_width:.1f} kA/m) = {linear_metrics['electrical_sensitivity']:.4f} (ΔG/ΔH) where G=Mx/(μ₀·Ms)"
->>>>>>> 01af158 (update to run fine and coarse mesh and creat .log files add slurm output)
             )
         print(
             f"  [ANALYSIS] Case {figure_name}: Non-linearity (max |residual| from M(H) fit) = {linear_metrics['non_linearity']:.4f} ΔM/Ms"
@@ -725,28 +657,115 @@ def main() -> int:
     """Post-process sensor loop results: concatenate data and create plots."""
 
     # =====================================================================
+    # COMMAND-LINE ARGUMENT PARSING
+    # =====================================================================
+    parser = argparse.ArgumentParser(
+        description="Sensor loop evaluation and plotting tool for MaMMoS D6.2 benchmarks",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run full evaluation on cases a, b, c
+  %(prog)s
+  
+  # Plot easy-axis hysteresis from custom file
+  %(prog)s --plot-a /path/to/data.dat --output-dir ./plots
+  
+  # Plot with custom field range
+  %(prog)s --plot-a data.dat --xlim -10 10
+        """,
+    )
+    parser.add_argument(
+        "--plot-a",
+        type=Path,
+        metavar="FILE",
+        help="Plot easy-axis hysteresis (case a) from specified .dat file",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        metavar="DIR",
+        help="Output directory for plots (default: same as input file or script directory)",
+    )
+    parser.add_argument(
+        "--xlim",
+        nargs=2,
+        type=float,
+        metavar=("MIN", "MAX"),
+        help="X-axis limits for plots in kA/m (default: -15 15)",
+    )
+    parser.add_argument(
+        "--figure-name",
+        type=str,
+        default="custom",
+        metavar="NAME",
+        help="Descriptive name for plot title (default: custom)",
+    )
+    
+    args = parser.parse_args()
+
+    # =====================================================================
+    # HANDLE --plot-a OPTION (standalone plotting mode)
+    # =====================================================================
+    if args.plot_a:
+        data_file = args.plot_a.resolve()
+        if not data_file.exists():
+            print(f"Error: File not found: {data_file}")
+            return 1
+        
+        # Determine output directory
+        if args.output_dir:
+            output_dir = args.output_dir.resolve()
+        else:
+            output_dir = data_file.parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Set up logging
+        log_dir = output_dir
+        logger, log_file = setup_logging(log_dir)
+        
+        # Determine xlim
+        plot_xlim = tuple(args.xlim) if args.xlim else (-15, 15)
+        
+        print("=" * 80)
+        print("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case a)")
+        print("=" * 80)
+        print(f"[INPUT]  Data file: {data_file}")
+        print(f"[OUTPUT] Directory: {output_dir}")
+        print(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
+        print(f"[PLOT]   Figure name: {args.figure_name}")
+        print()
+        
+        # Plot the data
+        plot_sensor_data_a(
+            data_file=data_file,
+            figure_name=args.figure_name,
+            original_data_file=data_file,  # Use same file for saturation detection
+            output_file_path=output_dir,
+            xlim=plot_xlim,
+            logger=logger,
+        )
+        
+        print()
+        print("=" * 80)
+        print("PLOTTING COMPLETED")
+        print("=" * 80)
+        print(f"[OUTPUT] Plot saved to: {output_dir}")
+        print(f"[LOG]    Log saved to: {log_file}")
+        print("=" * 80)
+        return 0
+
+    # =====================================================================
+    # DEFAULT MODE: Full evaluation pipeline
+    # =====================================================================
+    
+    # =====================================================================
     # USER CONFIGURATION
     # =====================================================================
     cases = ["a", "b", "c"]  # Choose any subset of ["a", "b", "c"]
-    plot_xlim = (-15, 15)  # X-axis limits for plots in kA/m
+    plot_xlim = tuple(args.xlim) if args.xlim else (-15, 15)  # X-axis limits for plots in kA/m
     window_half_width = 2.5  # Fixed benchmark window for sensitivities (case c)
     min_window_points = 5  # Minimum points needed in linear window (case c)
 
-<<<<<<< HEAD
-# Plot for case-c
-plot_sensor_data_c(
-    Path("sensor_case-c.dat"),
-    "hard-axis",
-)
-
-extract_electrical_sensitivity(
-    "sensor_case-c.dat",
-    field_window_kA_m=2.5,
-    tmr_ratio=1.0,
-    ra_kohm_um2=1.0,
-    area_um2=2.33,
-)
-=======
     # =====================================================================
     # END OF USER CONFIGURATION
     # =====================================================================
@@ -886,4 +905,3 @@ extract_electrical_sensitivity(
 
 if __name__ == "__main__":
     raise SystemExit(main())
->>>>>>> 01af158 (update to run fine and coarse mesh and creat .log files add slurm output)
