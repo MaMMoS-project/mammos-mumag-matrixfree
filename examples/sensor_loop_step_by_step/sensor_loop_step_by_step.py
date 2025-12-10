@@ -108,6 +108,8 @@ def main() -> int:
     )
     use_existing_mesh = (
         False  # True = use existing mesh file, False = generate new mesh
+        # Note: set to True to skip mesh generation if mesh file already exists
+        # in the base directory and is named "sensor_coarse_mesh.npz" or "sensor_fine_mesh.npz"
     )
     # Mesh size configuration for the eye sensor example
     mesh_size_coarse = 0.03  # Coarse mesh element size
@@ -115,7 +117,9 @@ def main() -> int:
     # Examples of mesh sizes and resulting element counts for the eye sensor example:
     # h = 0.03 creates      nodes=24727,    tets=77791
     # h = 0.02 creates      nodes=42803,    tets=133298
+    # h = 0.015 creates     nodes=38465,    tets=118574
     # h = 0.01 creates      nodes=177289,   tets=581004
+    # h = 0.01 creates      nodes=89761,    tets=292147 (meshpy backend)
     # h = 0.005 creates     nodes=1044050,  tets=4454406
 
     # ============================================================================
@@ -144,8 +148,8 @@ def main() -> int:
     print(f"  Initial state dir:     {initial_dir}")
 
     # Step0.1: select coarse or fine mesh, newly generate mesh if needed
-    #   + coarse mesh: python src/mesh.py --geom eye --extent 3.5,2.0,0.01 --h 0.03 --backend meshpy --out-name eye_meshpy --verbose
-    #   + fine mesh: python src/mesh.py --geom eye --extent 3.5,2.0,0.01 --h 0.005 --backend meshpy --out-name eye_meshpy --verbose
+    #   + coarse mesh: python src/mesh.py --geom eye --extent 3.5,1.0,0.01 --h 0.03 --backend meshpy --out-name eye_meshpy --verbose
+    #   + fine mesh: python src/mesh.py --geom eye --extent 3.5,1.0,0.01 --h 0.005 --backend meshpy --out-name eye_meshpy --verbose
     print("\n" + "-" * 80)
     print("SENSOR-EXAMPLE, STEP 0.1: Mesh Selection and Generation")
     print("-" * 80)
@@ -173,7 +177,7 @@ def main() -> int:
             "--geom",
             "eye",
             "--extent",
-            "3.5,2.0,0.01",
+            "3.5,1.0,0.01",
             "--backend",
             "meshpy",
             "--out-name",
