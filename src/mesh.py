@@ -1242,7 +1242,6 @@ def run_single_solid_mesher(
         # Eye: interpret Lx as length, Ly as full width, Lz as thickness
         length = float(Lx)
         width = float(Ly)
-        width_half = float(Ly) / 2.0
         thickness = float(Lz)
         if backend == "meshpy":
             knt, ijk = mesh_backend_meshpy_eye(
@@ -1259,7 +1258,7 @@ def run_single_solid_mesher(
         else:
             knt, ijk = mesh_backend_grid_eye(
                 length=length,
-                width=width_half,
+                width=width,
                 t=thickness,
                 ex=ex,
                 ey=ey,
