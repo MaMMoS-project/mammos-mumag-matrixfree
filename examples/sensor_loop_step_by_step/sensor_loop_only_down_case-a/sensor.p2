@@ -5,12 +5,12 @@ size = 1e-6
 mx = 0.
 my = 1.
 mz = 0.
-ini = 6
+ini = 2
 
 [field]
-hstart = -0.0314159
-hfinal =  0.0314159
-hstep = 0.00025
+hstart = 0.0314159
+hfinal =  -0.0314159
+hstep = -0.00025
 
 hx = 1. 
 hy = 0.
