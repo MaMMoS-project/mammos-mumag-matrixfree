@@ -209,9 +209,9 @@ Examples:
     parser.add_argument(
         "--mesh-size-fine",
         type=float,
-        default=0.0005,
+        default=0.005,
         metavar="SIZE",
-        help="Fine mesh element size in mesh units (default: 0.0005)",
+        help="Fine mesh element size in mesh units (default: 0.005)",
     )
     parser.add_argument(
         "--hstep",
