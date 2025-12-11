@@ -18,5 +18,5 @@ meshio = ">=5.3.5,<6"
 meshpy = ">=2025.1.1,<2026"
 
 [pypi-dependencies]
-jax = ">=0.8.0, <0.9"
+jax = { version = ">=0.8.1, <0.9", extras = ["cuda12"] }
 jaxopt = ">=0.8.5, <0.9"
