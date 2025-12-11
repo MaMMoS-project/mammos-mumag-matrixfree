@@ -80,6 +80,66 @@ def copy_state(
     shutil.copy(src, dst)
 
 
+def update_hstep_in_folders(directories: list[Path], new_hstep_abs: float) -> None:
+    """Update the hstep value in sensor.p2 files across multiple directories.
+    
+    This function modifies the hstep parameter in sensor.p2 files while preserving
+    the original sign (positive or negative). For example, if hstep = -0.00025 and
+    new_hstep_abs = 0.003, the result will be hstep = -0.003.
+
+    Args:
+        directories: List of directory paths containing sensor.p2 files
+        new_hstep_abs: New absolute value for hstep (sign will be preserved from original)
+
+    Raises:
+        FileNotFoundError: If a sensor.p2 file doesn't exist in a directory
+    """
+    import re
+    
+    print("\n" + "-" * 80)
+    print("UPDATE HSTEP VALUES IN SENSOR.P2 FILES")
+    print("-" * 80)
+    
+    updated_count = 0
+    for directory in directories:
+        p2_file = directory / "sensor.p2"
+        
+        if not p2_file.exists():
+            print(f"  [WARNING] sensor.p2 not found in {directory.name}, skipping")
+            continue
+            
+        with open(p2_file, "r") as f:
+            lines = f.readlines()
+        
+        modified = False
+        new_lines = []
+        
+        for line in lines:
+            # Match lines like "hstep = -0.00025" or "hstep = 0.00025"
+            match = re.match(r'^(\s*hstep\s*=\s*)([+-]?)(.+)$', line)
+            if match:
+                prefix = match.group(1)  # "hstep = "
+                sign = match.group(2)     # "-" or "+" or ""
+                old_value = match.group(3).strip()  # "0.00025"
+                
+                # Preserve the sign, update the magnitude
+                new_line = f"{prefix}{sign}{new_hstep_abs}\n"
+                new_lines.append(new_line)
+                
+                print(f"  [UPDATE] {directory.name}: hstep = {sign}{old_value} → {sign}{new_hstep_abs}")
+                modified = True
+                updated_count += 1
+            else:
+                new_lines.append(line)
+        
+        if modified:
+            with open(p2_file, "w") as f:
+                f.writelines(new_lines)
+    
+    print(f"[UPDATE] ✓ Updated hstep in {updated_count} file(s)")
+    print("-" * 80)
+
+
 def main() -> int:
     """
     Orchestrate the step-by-step sensor loop workflow.
@@ -116,6 +176,9 @@ Examples:
   # Run with custom mesh sizes
   python sensor_loop_step_by_step.py --minimal --mesh-size-coarse 0.02
   python sensor_loop_step_by_step.py --mesh-size-fine 0.01
+  
+  # Update hstep in all sensor_loop_only_* folders
+  python sensor_loop_step_by_step.py --hstep 0.003
         """,
     )
     parser.add_argument(
@@ -146,9 +209,15 @@ Examples:
     parser.add_argument(
         "--mesh-size-fine",
         type=float,
-        default=0.005,
+        default=0.0005,
         metavar="SIZE",
-        help="Fine mesh element size in mesh units (default: 0.005)",
+        help="Fine mesh element size in mesh units (default: 0.0005)",
+    )
+    parser.add_argument(
+        "--hstep",
+        type=float,
+        metavar="VALUE",
+        help="Update hstep value in all sensor_loop_only_* folders (preserves sign)",
     )
 
     args = parser.parse_args()
@@ -199,6 +268,26 @@ Examples:
     print(f"  Sensor loop directory: {sensor_loop_dir}")
     initial_dir = sensor_loop_dir.joinpath("sensor_loop_initial_state")
     print(f"  Initial state dir:     {initial_dir}")
+
+    # If --hstep is provided, update all sensor_loop_only_* folders before running simulations
+    if args.hstep is not None:
+        print("\n" + "=" * 80)
+        print("HSTEP UPDATE MODE")
+        print("=" * 80)
+        print(f"[CONFIG] New hstep absolute value: {args.hstep}")
+        
+        # Find all sensor_loop_only_* directories
+        all_sensor_dirs = list(sensor_loop_dir.glob("sensor_loop_only_*"))
+        
+        if not all_sensor_dirs:
+            print("[WARNING] No sensor_loop_only_* folders found")
+        else:
+            print(f"[INFO] Found {len(all_sensor_dirs)} sensor_loop_only_* folder(s)")
+            
+            # Update hstep in all folders
+            update_hstep_in_folders(all_sensor_dirs, args.hstep)
+            
+            print("[INFO] Continuing with simulation workflow...\n")
 
     # Step0.1: select coarse or fine mesh, newly generate mesh if needed
     #   + coarse mesh: python src/mesh.py --geom eye --extent 3.5,1.0,0.01 --h 0.03 --backend meshpy --out-name eye_meshpy --verbose
