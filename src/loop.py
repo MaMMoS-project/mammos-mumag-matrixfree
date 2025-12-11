@@ -285,6 +285,7 @@ def step4_read_materials(
 
     print(f"[debug] Read {len(intrinsic_properties)} .krn data lines")
     print(intrinsic_properties)
+
     if not intrinsic_properties:
         raise ValueError(".krn has no valid data lines")
 
@@ -307,32 +308,43 @@ def step4_read_materials(
         print(f"[warn] .krn has {nr_of_grains} lines; using first {nr_of_groups - 1}")
         intrinsic_properties = intrinsic_properties[: nr_of_groups - 1]
 
-    inv_size2 = 1.0 / (mesh_size * mesh_size)
-    Ms_list, Aex_list, K1_list, easy_rows = [], [], [], []
-    for theta, phi, K1, _, Js, A in intrinsic_properties:
-        Ms_list.append(float(Js) / float(MU0))
-        Aex_list.append(float(A) * inv_size2)
-        K1_list.append(float(K1))
-        st, ct = jnp.sin(theta), jnp.cos(theta)
-        sp, cp = jnp.sin(phi), jnp.cos(phi)
-        easy_rows.append(jnp.asarray([st * cp, st * sp, ct], dtype=jnp.float64))
+    intrinsic_properties.append([0.0] * nr_of_props)  # air material
+    intrinsic_properties_T: list[list[float]] = [
+        list(col) for col in zip(*intrinsic_properties)
+    ]
+    print(intrinsic_properties_T)
+    if nr_of_props == 6:
+        theta, phi, K_1, _, J_s, A_ex = intrinsic_properties_T
+        # Vectorized elementwise computation for all theta/phi entries
+        _theta = jnp.asarray(theta, dtype=jnp.float64)
+        _phi = jnp.asarray(phi, dtype=jnp.float64)
+        easy_axis_per_group = jnp.stack(
+            [
+                jnp.sin(_theta) * jnp.cos(_phi),
+                jnp.sin(_theta) * jnp.sin(_phi),
+                jnp.cos(_theta),
+            ],
+            axis=1,
+        )
+        #! Somebody who knows, is this really necessary?
+        easy_axis_per_group = easy_axis_per_group.at[-1].set(
+            jnp.zeros(3, dtype=easy_axis_per_group.dtype)
+        )
+    elif nr_of_props == 7:
+        theta, phi, _, K_1, K_1p, J_s, A_ex = intrinsic_properties_T
+    else:
+        raise NotImplementedError(
+            f".krn with {len(intrinsic_properties_T)} properties per line not supported"
+        )
+    A_ex_per_group = jnp.asarray(
+        [a / (mesh_size * mesh_size) for a in A_ex], dtype=jnp.float64
+    )
+    M_s_per_group = jnp.asarray([j / MU0 for j in J_s], dtype=jnp.float64)
+    K_1_per_group = jnp.asarray(K_1, dtype=jnp.float64)
 
-    # air material appended
-    Ms_list.append(0.0)
-    Aex_list.append(0.0)
-    K1_list.append(0.0)
+    k_easy_e = easy_axis_per_group[geom.mat_id - 1]
 
-    Ms_lookup = jnp.asarray(Ms_list, dtype=jnp.float64)
-    A_lookup_exchange = jnp.asarray(Aex_list, dtype=jnp.float64)
-    K1_lookup = jnp.asarray(K1_list, dtype=jnp.float64)
-
-    E = int(geom.conn.shape[0])
-    EasyLUT = jnp.zeros((nr_of_groups + 1, 3), dtype=jnp.float64)
-    for g in range(1, nr_of_groups):
-        EasyLUT = EasyLUT.at[g].set(easy_rows[g - 1])
-    k_easy_e = EasyLUT[geom.mat_id]
-
-    return MaterialsPack(Ms_lookup, A_lookup_exchange, K1_lookup, k_easy_e)
+    return MaterialsPack(M_s_per_group, A_ex_per_group, K_1_per_group, k_easy_e)
 
 
 # ----------------------------- Step 5/6 helpers ------------------------------
