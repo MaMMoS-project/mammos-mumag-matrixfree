@@ -113,8 +113,8 @@ echo "WORKING DIR:" $PWD
 cp -r $SLURM_SUBMIT_DIR/src .
 mkdir examples/
 cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/ ./examples/
-cp -r $SLURM_SUBMIT_DIR/*.py .
-cp -r $SLURM_SUBMIT_DIR/*.npz .
+# cp -r $SLURM_SUBMIT_DIR/*.py .
+# cp -r $SLURM_SUBMIT_DIR/*.npz .
 # cp -r $SLURM_SUBMIT_DIR/*.yml .
 
 # ============================================================================
