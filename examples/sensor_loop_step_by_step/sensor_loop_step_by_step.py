@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import os
+import argparse
 
 # Ensure unbuffered output for real-time logging, otherwise output may be delayed
 os.environ["PYTHONUNBUFFERED"] = "1"
@@ -93,27 +94,79 @@ def main() -> int:
         Exit code (0 for success)
     """
     # ============================================================================
-    # USER CONFIGURATION - Modify these variables as needed
+    # COMMAND-LINE ARGUMENT PARSING
+    # ============================================================================
+    parser = argparse.ArgumentParser(
+        description="Run step-by-step sensor loop simulations for MaMMoS Deliverable 6.2 benchmarks",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run full example with all cases (a, b, c)
+  python sensor_loop_step_by_step.py
+  
+  # Run minimal example with all cases
+  python sensor_loop_step_by_step.py --minimal
+  
+  # Run minimal example with only case a
+  python sensor_loop_step_by_step.py --minimal --cases a
+  
+  # Run full example with cases a and b
+  python sensor_loop_step_by_step.py --cases a b
+  
+  # Run with custom mesh sizes
+  python sensor_loop_step_by_step.py --minimal --mesh-size-coarse 0.02
+  python sensor_loop_step_by_step.py --mesh-size-fine 0.01
+        """,
+    )
+    parser.add_argument(
+        "--minimal",
+        action="store_true",
+        help="Use coarse mesh (faster) instead of fine mesh (default: False, use fine mesh)",
+    )
+    parser.add_argument(
+        "--cases",
+        nargs="+",
+        default=["a", "b", "c"],
+        choices=["a", "b", "c"],
+        metavar="CASE",
+        help="Cases to run: a (easy-axis), b (45-degree), c (hard-axis) (default: a b c)",
+    )
+    parser.add_argument(
+        "--no-mesh-regen",
+        action="store_true",
+        help="Use existing mesh file instead of regenerating (default: False, regenerate mesh)",
+    )
+    parser.add_argument(
+        "--mesh-size-coarse",
+        type=float,
+        default=0.03,
+        metavar="SIZE",
+        help="Coarse mesh element size in mesh units (default: 0.03)",
+    )
+    parser.add_argument(
+        "--mesh-size-fine",
+        type=float,
+        default=0.005,
+        metavar="SIZE",
+        help="Fine mesh element size in mesh units (default: 0.005)",
+    )
+
+    args = parser.parse_args()
+
+    # ============================================================================
+    # USER CONFIGURATION FROM COMMAND-LINE ARGUMENTS
     # ============================================================================
 
     # Case selection: "a" = easy-axis, "b" = 45-degree, "c" = hard-axis
     # See "MaMMoS_Deliverable_6.2_Definition of benchmark.pdf", chapter 3
-    # cases = ["a"]
-    # cases = ["a", "b"]
-    cases = ["a", "b", "c"]
+    cases = args.cases
 
     # Mesh configuration
-    run_minimal_example = (
-        False  # True = coarse mesh (faster), False = fine mesh (accurate)
-    )
-    use_existing_mesh = (
-        False  # True = use existing mesh file, False = generate new mesh
-        # Note: set to True to skip mesh generation if mesh file already exists
-        # in the base directory and is named "sensor_coarse_mesh.npz" or "sensor_fine_mesh.npz"
-    )
+    run_minimal_example = args.minimal
+    use_existing_mesh = args.no_mesh_regen
     # Mesh size configuration for the eye sensor example
-    mesh_size_coarse = 0.03  # Coarse mesh element size
-    mesh_size_fine = 0.005  # Fine mesh element size
+    mesh_size_coarse = args.mesh_size_coarse  # Coarse mesh element size
+    mesh_size_fine = args.mesh_size_fine  # Fine mesh element size
     # Examples of mesh sizes and resulting element counts for the eye sensor example:
     # h = 0.03 creates      nodes=24727,    tets=77791
     # h = 0.02 creates      nodes=42803,    tets=133298
@@ -123,7 +176,7 @@ def main() -> int:
     # h = 0.005 creates     nodes=1044050,  tets=4454406
 
     # ============================================================================
-    # END OF USER CONFIGURATION
+    # END OF CONFIGURATION
     # ============================================================================
 
     print("\n" + "=" * 80)
