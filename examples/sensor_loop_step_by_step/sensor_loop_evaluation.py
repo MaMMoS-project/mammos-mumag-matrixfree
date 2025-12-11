@@ -175,6 +175,7 @@ def plot_sensor_data_a(
     original_data_file: Path,
     output_file_path: Path,
     xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     logger: logging.Logger | None = None,
 ) -> None:
     """Plot easy-axis hysteresis loop and highlight saturation point (M/Ms ≈ 1).
@@ -185,6 +186,7 @@ def plot_sensor_data_a(
         original_data_file: Path to up-sweep data for saturation detection
         output_file_path: Directory where PNG will be saved
         xlim: Optional (x_min, x_max) tuple for x-axis limits in kA/m
+        ylim: Optional (y_min, y_max) tuple for y-axis limits in M/Ms (default: -1.05, 1.05)
         logger: Optional logger instance for output
     """
     if logger is None:
@@ -245,6 +247,10 @@ def plot_sensor_data_a(
     plt.grid(True, alpha=0.3)
     if xlim:
         plt.xlim(*xlim)
+    if ylim:
+        plt.ylim(*ylim)
+    else:
+        plt.ylim(-1.05, 1.05)
     plt.tight_layout()
 
     save_path = output_file_path / f"sensor_case-a-{figure_name}.png"
@@ -259,6 +265,7 @@ def plot_sensor_data_b(
     original_data_file: Path,
     output_file_path: Path,
     xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     logger: logging.Logger | None = None,
 ) -> None:
     """Plot 45-degree hysteresis loop and highlight coercivity point (M/Ms = 0).
@@ -269,6 +276,7 @@ def plot_sensor_data_b(
         original_data_file: Path to up-sweep data for coercivity detection
         output_file_path: Directory where PNG will be saved
         xlim: Optional (x_min, x_max) tuple for x-axis limits in kA/m
+        ylim: Optional (y_min, y_max) tuple for y-axis limits in M/Ms (default: -1.05, 1.05)
         logger: Optional logger instance for output
     """
     if logger is None:
@@ -329,6 +337,10 @@ def plot_sensor_data_b(
     plt.grid(True, alpha=0.3)
     if xlim:
         plt.xlim(*xlim)
+    if ylim:
+        plt.ylim(*ylim)
+    else:
+        plt.ylim(-1.05, 1.05)
     plt.tight_layout()
 
     save_path = output_file_path / f"sensor_case-b-{figure_name}.png"
@@ -515,6 +527,7 @@ def plot_sensor_data_c(
     figure_name: str,
     output_file_path: Path,
     xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     window_half_width: float = 2.5,
     min_window_points: int = 5,
     logger: logging.Logger | None = None,
@@ -538,6 +551,7 @@ def plot_sensor_data_c(
         figure_name: Descriptive name for plot title (e.g., 'hard-axis')
         output_file_path: Directory where PNG will be saved
         xlim: Optional (x_min, x_max) tuple for x-axis limits in kA/m
+        ylim: Optional (y_min, y_max) tuple for y-axis limits in M/Ms (default: -1.05, 1.05)
         window_half_width: Half-width of symmetric fit window (default: 2.5 kA/m)
         min_window_points: Minimum points required for linear fit (default: 5)
         logger: Optional logger instance for output
@@ -645,6 +659,10 @@ def plot_sensor_data_c(
     plt.grid(True, alpha=0.3)
     if xlim:
         plt.xlim(*xlim)
+    if ylim:
+        plt.ylim(*ylim)
+    else:
+        plt.ylim(-1.05, 1.05)
     plt.tight_layout()
 
     save_path = output_file_path / f"sensor_case-c-{figure_name}.png"
