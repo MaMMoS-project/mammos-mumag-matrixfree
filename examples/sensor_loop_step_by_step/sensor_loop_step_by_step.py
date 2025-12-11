@@ -177,7 +177,7 @@ Examples:
   python sensor_loop_step_by_step.py --minimal --mesh-size-coarse 0.02
   python sensor_loop_step_by_step.py --mesh-size-fine 0.01
   
-  # Update hstep in all sensor_loop_only_* folders
+  # Update hstep in all sensor_case-*_* folders
   python sensor_loop_step_by_step.py --hstep 0.003
         """,
     )
@@ -217,7 +217,7 @@ Examples:
         "--hstep",
         type=float,
         metavar="VALUE",
-        help="Update hstep value in all sensor_loop_only_* folders (preserves sign)",
+        help="Update hstep value in all sensor_case-*_* folders (preserves sign)",
     )
 
     args = parser.parse_args()
@@ -266,23 +266,23 @@ Examples:
     print(f"  Examples directory:    {examples_dir}")
     sensor_loop_dir = examples_dir.joinpath("sensor_loop_step_by_step")
     print(f"  Sensor loop directory: {sensor_loop_dir}")
-    initial_dir = sensor_loop_dir.joinpath("sensor_loop_initial_state")
+    initial_dir = sensor_loop_dir.joinpath("sensor_initial_state")
     print(f"  Initial state dir:     {initial_dir}")
 
-    # If --hstep is provided, update all sensor_loop_only_* folders before running simulations
+    # If --hstep is provided, update all sensor_case-*_* folders before running simulations
     if args.hstep is not None:
         print("\n" + "=" * 80)
         print("HSTEP UPDATE MODE")
         print("=" * 80)
         print(f"[CONFIG] New hstep absolute value: {args.hstep}")
         
-        # Find all sensor_loop_only_* directories
-        all_sensor_dirs = list(sensor_loop_dir.glob("sensor_loop_only_*"))
+        # Find all sensor_case-*_* directories
+        all_sensor_dirs = list(sensor_loop_dir.glob("sensor_case-*_*"))
         
         if not all_sensor_dirs:
-            print("[WARNING] No sensor_loop_only_* folders found")
+            print("[WARNING] No sensor_case-*_* folders found")
         else:
-            print(f"[INFO] Found {len(all_sensor_dirs)} sensor_loop_only_* folder(s)")
+            print(f"[INFO] Found {len(all_sensor_dirs)} sensor_case-*_* folder(s)")
             
             # Update hstep in all folders
             update_hstep_in_folders(all_sensor_dirs, args.hstep)
@@ -343,8 +343,8 @@ Examples:
 
     # In this example "down" and "up" refer to the two halves of the hysteresis loop,
     # "down" means decreasing field, "up" means increasing field
-    down_dirs = {s: sensor_loop_dir / f"sensor_loop_only_down_case-{s}" for s in cases}
-    up_dirs = {s: sensor_loop_dir / f"sensor_loop_only_up_case-{s}" for s in cases}
+    down_dirs = {s: sensor_loop_dir / f"sensor_case-{s}_down" for s in cases}
+    up_dirs = {s: sensor_loop_dir / f"sensor_case-{s}_up" for s in cases}
 
     # Copy mesh file to the initial-state and all case directories and rename it to "sensor.npz"
     print("\n[MESH DISTRIBUTION] Copying mesh to all case directories...")
@@ -390,7 +390,7 @@ Examples:
                 removed_count += 1
     print(f"[CLEANUP] ✓ Removed {removed_count} previous output file(s)")
 
-    # Step1: run "python ./../../../src/loop.py --mesh sensor" in subfolder "sensor_loop_initial_state"
+    # Step1: run "python ./../../../src/loop.py --mesh sensor" in subfolder "sensor_initial_state"
     # -> handled directly via run_loop with the initial-state directory
     print("\n" + "=" * 80)
     print("SENSOR-EXAMPLE, STEP 1: Initial Equilibrium Computation")
@@ -403,10 +403,10 @@ Examples:
     print(f"[RESULT] ✓ Initial state saved as: {initial_state_name}")
 
     # Step2: copy the last state file containing the information of the computed equilibrium
-    # from "sensor_loop_initial_state" to
-    # "sensor_loop_only_down_case-a" and
-    # "sensor_loop_only_down_case-b" and
-    # "sensor_loop_only_down_case-c"
+    # from "sensor_initial_state" to
+    # "sensor_case-a_down" and
+    # "sensor_case-b_down" and
+    # "sensor_case-c_down"
     # -> `copy_state()` - generic function to copy state files between any directories
     print("\n" + "=" * 80)
     print("SENSOR-EXAMPLE, STEP 2: Distribute Initial State to Down-Cases")
@@ -417,11 +417,11 @@ Examples:
     print(f"[COPY] ✓ Initial state distributed to {len(cases)} down-case(s)")
 
     # Steps 3-11: run down, copy result to up, run up for each case
-    # Step3: run "python ./../../../src/loop.py --mesh sensor" in subfolder "sensor_loop_only_down_case-a"
+    # Step3: run "python ./../../../src/loop.py --mesh sensor" in subfolder "sensor_case-a_down"
     # -> handled via run_loop function
-    # Step4: copy the last state file from "sensor_loop_only_down_case-a" to "sensor_loop_only_up_case-a"
+    # Step4: copy the last state file from "sensor_case-a_down" to "sensor_case-a_up"
     # -> handled via copy_state function
-    # Step5: run "python ./../../../src/loop.py --mesh sensor" in subfolder "sensor_loop_only_up_case-a"
+    # Step5: run "python ./../../../src/loop.py --mesh sensor" in subfolder "sensor_case-a_up"
     # -> handled via run_loop function
     # (same pattern for cases b and c)
     for idx, s in enumerate(cases, 1):

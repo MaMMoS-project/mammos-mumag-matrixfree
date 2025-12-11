@@ -958,10 +958,10 @@ Examples:
     concatenated_count = 0
     for case in cases:
         down_file = (
-            sensor_loop_dir / f"sensor_loop_only_down_case-{case}/sensor.dat"
+            sensor_loop_dir / f"sensor_case-{case}_down/sensor.dat"
         ).resolve()
         up_file = (
-            sensor_loop_dir / f"sensor_loop_only_up_case-{case}/sensor.dat"
+            sensor_loop_dir / f"sensor_case-{case}_up/sensor.dat"
         ).resolve()
         output_file = (sensor_loop_dir / f"sensor_case-{case}.dat").resolve()
 
@@ -998,7 +998,7 @@ Examples:
 
         if case == "a":
             # Easy-axis: look for saturation
-            original_data = sensor_loop_dir / "sensor_loop_only_up_case-a/sensor.dat"
+            original_data = sensor_loop_dir / "sensor_case-a_up/sensor.dat"
             plot_sensor_data_a(
                 output_file,
                 case_names[case],
@@ -1009,7 +1009,7 @@ Examples:
             )
         elif case == "b":
             # 45-degree: look for coercivity
-            original_data = sensor_loop_dir / "sensor_loop_only_up_case-b/sensor.dat"
+            original_data = sensor_loop_dir / "sensor_case-b_up/sensor.dat"
             plot_sensor_data_b(
                 output_file,
                 case_names[case],
