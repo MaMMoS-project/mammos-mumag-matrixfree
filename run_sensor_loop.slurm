@@ -138,28 +138,30 @@ fi
 echo "After RUNNING EVALUATION : sensor loop evaluation.py"
 
 # copy files back if necessary
-cp ./examples/sensor_loop_step_by_step/sensor_initial_state/sensor.dat $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_initial_state/
 cp ./examples/sensor_loop_step_by_step/sensor_initial_state/sensor.npz $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_initial_state/
 cp ./examples/sensor_loop_step_by_step/sensor_initial_state/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_initial_state/
+cp ./examples/sensor_loop_step_by_step/sensor_initial_state/sensor.dat $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_initial_state/
+
+cp ./examples/sensor_loop_step_by_step/sensor_case-a_down/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_down/
 cp ./examples/sensor_loop_step_by_step/sensor_case-a_down/sensor.dat $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_down/
-cp ./examples/sensor_loop_step_by_step/sensor_case-a_down/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_down/
-
-cp ./examples/sensor_loop_step_by_step/sensor_case-b_down/sensor.dat $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-b_down/
-cp ./examples/sensor_loop_step_by_step/sensor_case-b_down/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-b_down/
-
-cp ./examples/sensor_loop_step_by_step/sensor_case-c_down/sensor.dat $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-c_down/
-cp ./examples/sensor_loop_step_by_step/sensor_case-c_down/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-c_down/
-
 cp ./examples/sensor_loop_step_by_step/sensor_case-a_down/*.vtu $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_down/
-cp ./examples/sensor_loop_step_by_step/sensor_case-b_down/*.vtu $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-b_down/
-cp ./examples/sensor_loop_step_by_step/sensor_case-c_down/*.vtu $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-c_down/
-# Copy all sensor.p2 files back 
-cp ./examples/sensor_loop_step_by_step/sensor_case-a_down/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_down/
 cp ./examples/sensor_loop_step_by_step/sensor_case-a_up/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_up/
+cp ./examples/sensor_loop_step_by_step/sensor_case-a_up/sensor.dat $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_up/
+cp ./examples/sensor_loop_step_by_step/sensor_case-a_up/*.vtu $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_up/
+
 cp ./examples/sensor_loop_step_by_step/sensor_case-b_down/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-b_down/
+cp ./examples/sensor_loop_step_by_step/sensor_case-b_down/sensor.dat $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-b_down/
+cp ./examples/sensor_loop_step_by_step/sensor_case-b_down/*.vtu $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-b_down/
 cp ./examples/sensor_loop_step_by_step/sensor_case-b_up/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-b_up/
+cp ./examples/sensor_loop_step_by_step/sensor_case-b_up/sensor.dat $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-b_up/
+cp ./examples/sensor_loop_step_by_step/sensor_case-b_up/*.vtu $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-b_up/
+
 cp ./examples/sensor_loop_step_by_step/sensor_case-c_down/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-c_down/
+cp ./examples/sensor_loop_step_by_step/sensor_case-c_down/sensor.dat $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-c_down/
+cp ./examples/sensor_loop_step_by_step/sensor_case-c_down/*.vtu $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-c_down/
 cp ./examples/sensor_loop_step_by_step/sensor_case-c_up/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-c_up/
+cp ./examples/sensor_loop_step_by_step/sensor_case-c_up/sensor.dat $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-c_up/
+cp ./examples/sensor_loop_step_by_step/sensor_case-c_up/*.vtu $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-c_up/
 
 # Number changes with settings in .p2 cp ./examples/sensor_loop_step_by_step/sensor_case-a_down/sensor.0002.state.npz $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_down/
 
