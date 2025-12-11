@@ -670,8 +670,11 @@ Examples:
   # Plot easy-axis hysteresis from custom file
   %(prog)s --plot-a /path/to/data.dat --output-dir ./plots
   
-  # Plot with custom field range
-  %(prog)s --plot-a data.dat --xlim -10 10
+  # Plot 45-degree hysteresis with custom field range
+  %(prog)s --plot-b data.dat --xlim -10 10
+  
+  # Plot hard-axis hysteresis with sensitivity analysis
+  %(prog)s --plot-c data.dat --output-dir ./plots
         """,
     )
     parser.add_argument(
@@ -679,6 +682,18 @@ Examples:
         type=Path,
         metavar="FILE",
         help="Plot easy-axis hysteresis (case a) from specified .dat file",
+    )
+    parser.add_argument(
+        "--plot-b",
+        type=Path,
+        metavar="FILE",
+        help="Plot 45-degree hysteresis (case b) from specified .dat file",
+    )
+    parser.add_argument(
+        "--plot-c",
+        type=Path,
+        metavar="FILE",
+        help="Plot hard-axis hysteresis (case c) from specified .dat file",
     )
     parser.add_argument(
         "--output-dir",
@@ -756,6 +771,57 @@ Examples:
         
         print()
         print("=" * 80)
+        print(f"[LOG]    Log saved to: {log_file}")
+        print("=" * 80)
+        return 0
+
+    # =====================================================================
+    # HANDLE --plot-b OPTION (standalone plotting mode)
+    # =====================================================================
+    if args.plot_b:
+        data_file = args.plot_b.resolve()
+        if not data_file.exists():
+            print(f"Error: File not found: {data_file}")
+            return 1
+        
+        # Determine output directory
+        if args.output_dir:
+            output_dir = args.output_dir.resolve()
+        else:
+            output_dir = data_file.parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Set up logging
+        log_dir = output_dir
+        logger, log_file = setup_logging(log_dir)
+        
+        # Determine xlim
+        plot_xlim = tuple(args.xlim) if args.xlim else (-15, 15)
+        
+        # Determine reference file for coercivity detection
+        reference_file = args.reference_file if args.reference_file else data_file
+        
+        print("=" * 80)
+        print("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case b)")
+        print("=" * 80)
+        print(f"[INPUT]  Data file: {data_file}")
+        print(f"[OUTPUT] Directory: {output_dir}")
+        print(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
+        print(f"[PLOT]   Figure name: {args.figure_name}")
+        print()
+        
+        # Plot the data
+        plot_sensor_data_b(
+            data_file=data_file,
+            figure_name=args.figure_name,
+            original_data_file=reference_file,  # Use reference file for coercivity detection
+            output_file_path=output_dir,
+            xlim=plot_xlim,
+            logger=logger,
+        )
+        
+        print()
+        print("=" * 80)
         print("PLOTTING COMPLETED")
         print("=" * 80)
         print(f"[OUTPUT] Plot saved to: {output_dir}")
@@ -763,6 +829,66 @@ Examples:
         print("=" * 80)
         return 0
 
+    # =====================================================================
+    # HANDLE --plot-c OPTION (standalone plotting mode)
+    # =====================================================================
+    if args.plot_c:
+        data_file = args.plot_c.resolve()
+        if not data_file.exists():
+            print(f"Error: File not found: {data_file}")
+            return 1
+        
+        # Determine output directory
+        if args.output_dir:
+            output_dir = args.output_dir.resolve()
+        else:
+            output_dir = data_file.parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Set up logging
+        log_dir = output_dir
+        logger, log_file = setup_logging(log_dir)
+        
+        # Determine xlim
+        plot_xlim = tuple(args.xlim) if args.xlim else (-15, 15)
+        
+        # Hard-axis sensitivity analysis parameters
+        window_half_width = 2.5  # Fixed benchmark window for sensitivities
+        min_window_points = 5  # Minimum points needed in linear window
+        
+        print("=" * 80)
+        print("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case c)")
+        print("=" * 80)
+        print(f"[INPUT]  Data file: {data_file}")
+        print(f"[OUTPUT] Directory: {output_dir}")
+        print(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
+        print(f"[PLOT]   Figure name: {args.figure_name}")
+        print(f"[PLOT]   Fit window: ±{window_half_width} kA/m")
+        print()
+        
+        # Plot the data
+        plot_sensor_data_c(
+            data_file=data_file,
+            figure_name=args.figure_name,
+            output_file_path=output_dir,
+            xlim=plot_xlim,
+            window_half_width=window_half_width,
+            min_window_points=min_window_points,
+            logger=logger,
+        )
+        
+        print()
+        print("=" * 80)
+        print("PLOTTING COMPLETED")
+        print("=" * 80)
+        print(f"[OUTPUT] Plot saved to: {output_dir}")
+        print(f"[LOG]    Log saved to: {log_file}")
+        print("=" * 80)
+        return 0
+
+    # =====================================================================
+    # DEFAULT MODE: Full evaluation pipeline
+    # =====================================================================
     # =====================================================================
     # DEFAULT MODE: Full evaluation pipeline
     # =====================================================================
