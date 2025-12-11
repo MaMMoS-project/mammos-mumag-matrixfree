@@ -51,33 +51,11 @@ os.environ["PYTHONUNBUFFERED"] = "1"
 sys.stdout.reconfigure(line_buffering=True)
 
 
-class DualStreamHandler(logging.StreamHandler):
-    """Custom handler that writes to both console and logger simultaneously."""
-
-    def __init__(self, console_stream, log_file):
-        super().__init__(console_stream)
-        self.console_stream = console_stream
-        self.log_file = log_file
-
-    def emit(self, record):
-        """Emit a record to both console and file."""
-        try:
-            msg = self.format(record)
-            # Write to console
-            self.console_stream.write(msg + self.terminator)
-            self.console_stream.flush()
-            # Write to log file
-            self.log_file.write(msg + self.terminator)
-            self.log_file.flush()
-        except Exception:
-            self.handleError(record)
-
-
 def setup_logging(log_dir: Path) -> tuple[logging.Logger, Path]:
-    """Configure logging to both console and timestamped file using print() statements.
+    """Configure logging to both console and timestamped file.
 
-    Creates a logger that captures all print() output to both stdout and a timestamped
-    .log file in ISO 8601 format (YYYY-MM-DDTHH-MM-SS.log).
+    Creates a logger that writes to both stdout and a timestamped .log file
+    in ISO 8601 format (YYYY-MM-DDTHH-MM-SS.log).
 
     Args:
         log_dir: Directory where the .log file will be created
@@ -91,9 +69,6 @@ def setup_logging(log_dir: Path) -> tuple[logging.Logger, Path]:
     iso_timestamp = str(np.datetime64("now", "s")).replace(":", "-")
     log_file_path = log_dir / f"sensor_loop_evaluation_{iso_timestamp}.log"
 
-    # Open log file for writing
-    log_file = open(log_file_path, mode="w", encoding="utf-8")
-
     # Create logger
     logger = logging.getLogger("sensor_loop_evaluation")
     logger.setLevel(logging.DEBUG)
@@ -102,11 +77,17 @@ def setup_logging(log_dir: Path) -> tuple[logging.Logger, Path]:
     # Format for logging
     formatter = logging.Formatter(fmt="%(message)s")
 
-    # Dual handler (writes to console and file simultaneously)
-    dual_handler = DualStreamHandler(sys.stdout, log_file)
-    dual_handler.setLevel(logging.DEBUG)
-    dual_handler.setFormatter(formatter)
-    logger.addHandler(dual_handler)
+    # Console handler (stdout)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.DEBUG)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    # File handler (log file)
+    file_handler = logging.FileHandler(log_file_path, mode="w", encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
     return logger, log_file_path
 
@@ -204,11 +185,11 @@ def plot_sensor_data_a(
             original_data_file, value=1.0, tolerance=0.05, Ms_in_A_Per_m=Ms_in_A_Per_m
         )
         if Hs_in_kA_Per_m is not None:
-            print(
+            logger.info(
                 f"  [ANALYSIS] Case {figure_name}: Saturation field Hs ≈ {Hs_in_kA_Per_m:.2f} kA/m (M/Ms = {M_over_Ms_value:.3f})"
             )
         else:
-            print(
+            logger.info(
                 f"  [WARNING] Case {figure_name}: Could not detect saturation (M/Ms ≈ 1)"
             )
 
@@ -256,7 +237,7 @@ def plot_sensor_data_a(
     save_path = output_file_path / f"sensor_case-a-{figure_name}.png"
     plt.savefig(save_path.resolve(), dpi=300)
     plt.close()
-    print(f"  [PLOT] Saved: {save_path.name}")
+    logger.info(f"  [PLOT] Saved: {save_path.name}")
 
 
 def plot_sensor_data_b(
@@ -294,11 +275,11 @@ def plot_sensor_data_b(
             original_data_file, value=0.0, tolerance=0.05, Ms_in_A_Per_m=Ms_in_A_Per_m
         )
         if Hc45_in_kA_Per_m is not None:
-            print(
+            logger.info(
                 f"  [ANALYSIS] Case {figure_name}: Coercivity Hc45 ≈ {Hc45_in_kA_Per_m:.2f} kA/m (M/Ms = {M_over_Ms_value:.3f})"
             )
         else:
-            print(
+            logger.info(
                 f"  [WARNING] Case {figure_name}: Could not detect coercivity (M/Ms ≈ 0)"
             )
 
@@ -346,7 +327,7 @@ def plot_sensor_data_b(
     save_path = output_file_path / f"sensor_case-b-{figure_name}.png"
     plt.savefig(save_path.resolve(), dpi=300)
     plt.close()
-    print(f"  [PLOT] Saved: {save_path.name}")
+    logger.info(f"  [PLOT] Saved: {save_path.name}")
 
 
 def extract_linear_range(
@@ -391,7 +372,6 @@ def extract_linear_range(
     """
     centered_mask = np.abs(Hext_kA_per_m) <= window_half_width
     if np.count_nonzero(centered_mask) < min_window_points:
-        print("Not enough points in the centered window for linear fit.")
         return None
     H_window = Hext_kA_per_m[centered_mask]
     M_window = M_over_Ms[centered_mask]
@@ -594,7 +574,7 @@ def plot_sensor_data_c(
     G_over_Ms = Mx_over_Ms  # Use simplified normalized form for sensitivity
 
     # Print TMR sensor parameters
-    print(
+    logger.info(
         f"  [TMR PARAMS] TMR ratio = {TMR:.2f} ({TMR * 100:.0f}%), P² = {P2:.4f}, G₀ = {G0:.6e} S, Rmin = {Rmin:.2e} Ω"
     )
 
@@ -637,18 +617,18 @@ def plot_sensor_data_c(
             zorder=4,
         )
 
-        print(
+        logger.info(
             f"  [ANALYSIS] Case {figure_name}: Magnetic sensitivity (|H| ≤ {window_half_width:.1f} kA/m) = {linear_metrics['magnetic_sensitivity']:.4f} (ΔM/Ms)/(kA/m)"
         )
         if "electrical_sensitivity" in linear_metrics:
-            print(
+            logger.info(
                 f"  [ANALYSIS] Case {figure_name}: Electrical sensitivity (|H| ≤ {window_half_width:.1f} kA/m) = {linear_metrics['electrical_sensitivity']:.4f} (ΔG/ΔH) where G=Mx/(μ₀·Ms)"
             )
-        print(
+        logger.info(
             f"  [ANALYSIS] Case {figure_name}: Non-linearity (max |residual| from M(H) fit) = {linear_metrics['non_linearity']:.4f} ΔM/Ms"
         )
     else:
-        print(
+        logger.info(
             f"  [WARNING] Case {figure_name}: Insufficient data in ±{window_half_width:.1f} kA/m window to compute sensitivities"
         )
 
@@ -668,7 +648,7 @@ def plot_sensor_data_c(
     save_path = output_file_path / f"sensor_case-c-{figure_name}.png"
     plt.savefig(save_path.resolve(), dpi=300)
     plt.close()
-    print(f"  [PLOT] Saved: {save_path.name}")
+    logger.info(f"  [PLOT] Saved: {save_path.name}")
 
 
 def main() -> int:
@@ -768,14 +748,14 @@ Examples:
         # Determine reference file for saturation detection
         reference_file = args.reference_file if args.reference_file else data_file
         
-        print("=" * 80)
-        print("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case a)")
-        print("=" * 80)
-        print(f"[INPUT]  Data file: {data_file}")
-        print(f"[OUTPUT] Directory: {output_dir}")
-        print(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
-        print(f"[PLOT]   Figure name: {args.figure_name}")
-        print()
+        logger.info("=" * 80)
+        logger.info("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case a)")
+        logger.info("=" * 80)
+        logger.info(f"[INPUT]  Data file: {data_file}")
+        logger.info(f"[OUTPUT] Directory: {output_dir}")
+        logger.info(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
+        logger.info(f"[PLOT]   Figure name: {args.figure_name}")
+        logger.info()
         
         # Plot the data
         plot_sensor_data_a(
@@ -787,10 +767,10 @@ Examples:
             logger=logger,
         )
         
-        print()
-        print("=" * 80)
-        print(f"[LOG]    Log saved to: {log_file}")
-        print("=" * 80)
+        logger.info()
+        logger.info("=" * 80)
+        logger.info(f"[LOG]    Log saved to: {log_file}")
+        logger.info("=" * 80)
         return 0
 
     # =====================================================================
@@ -819,14 +799,14 @@ Examples:
         # Determine reference file for coercivity detection
         reference_file = args.reference_file if args.reference_file else data_file
         
-        print("=" * 80)
-        print("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case b)")
-        print("=" * 80)
-        print(f"[INPUT]  Data file: {data_file}")
-        print(f"[OUTPUT] Directory: {output_dir}")
-        print(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
-        print(f"[PLOT]   Figure name: {args.figure_name}")
-        print()
+        logger.info("=" * 80)
+        logger.info("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case b)")
+        logger.info("=" * 80)
+        logger.info(f"[INPUT]  Data file: {data_file}")
+        logger.info(f"[OUTPUT] Directory: {output_dir}")
+        logger.info(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
+        logger.info(f"[PLOT]   Figure name: {args.figure_name}")
+        logger.info()
         
         # Plot the data
         plot_sensor_data_b(
@@ -838,13 +818,13 @@ Examples:
             logger=logger,
         )
         
-        print()
-        print("=" * 80)
-        print("PLOTTING COMPLETED")
-        print("=" * 80)
-        print(f"[OUTPUT] Plot saved to: {output_dir}")
-        print(f"[LOG]    Log saved to: {log_file}")
-        print("=" * 80)
+        logger.info()
+        logger.info("=" * 80)
+        logger.info("PLOTTING COMPLETED")
+        logger.info("=" * 80)
+        logger.info(f"[OUTPUT] Plot saved to: {output_dir}")
+        logger.info(f"[LOG]    Log saved to: {log_file}")
+        logger.info("=" * 80)
         return 0
 
     # =====================================================================
@@ -874,15 +854,15 @@ Examples:
         window_half_width = 2.5  # Fixed benchmark window for sensitivities
         min_window_points = 5  # Minimum points needed in linear window
         
-        print("=" * 80)
-        print("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case c)")
-        print("=" * 80)
-        print(f"[INPUT]  Data file: {data_file}")
-        print(f"[OUTPUT] Directory: {output_dir}")
-        print(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
-        print(f"[PLOT]   Figure name: {args.figure_name}")
-        print(f"[PLOT]   Fit window: ±{window_half_width} kA/m")
-        print()
+        logger.info("=" * 80)
+        logger.info("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case c)")
+        logger.info("=" * 80)
+        logger.info(f"[INPUT]  Data file: {data_file}")
+        logger.info(f"[OUTPUT] Directory: {output_dir}")
+        logger.info(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
+        logger.info(f"[PLOT]   Figure name: {args.figure_name}")
+        logger.info(f"[PLOT]   Fit window: ±{window_half_width} kA/m")
+        logger.info()
         
         # Plot the data
         plot_sensor_data_c(
@@ -895,13 +875,13 @@ Examples:
             logger=logger,
         )
         
-        print()
-        print("=" * 80)
-        print("PLOTTING COMPLETED")
-        print("=" * 80)
-        print(f"[OUTPUT] Plot saved to: {output_dir}")
-        print(f"[LOG]    Log saved to: {log_file}")
-        print("=" * 80)
+        logger.info()
+        logger.info("=" * 80)
+        logger.info("PLOTTING COMPLETED")
+        logger.info("=" * 80)
+        logger.info(f"[OUTPUT] Plot saved to: {output_dir}")
+        logger.info(f"[LOG]    Log saved to: {log_file}")
+        logger.info("=" * 80)
         return 0
 
     # =====================================================================
@@ -929,27 +909,27 @@ Examples:
     log_dir = run_dir
     logger, log_file = setup_logging(log_dir)
 
-    print("=" * 80)
-    print("SENSOR LOOP EVALUATION")
-    print("=" * 80)
+    logger.info("=" * 80)
+    logger.info("SENSOR LOOP EVALUATION")
+    logger.info("=" * 80)
 
     # Resolve paths relative to this script to allow running from anywhere
     examples_dir = base.joinpath("examples")
     sensor_loop_dir = examples_dir.joinpath("sensor_loop_step_by_step")
 
-    print("[PATH INFO]")
-    print(f"  Base directory:        {base}")
-    print(f"  Examples directory:    {examples_dir}")
-    print(f"  Sensor loop directory: {sensor_loop_dir}")
+    logger.info("[PATH INFO]")
+    logger.info(f"  Base directory:        {base}")
+    logger.info(f"  Examples directory:    {examples_dir}")
+    logger.info(f"  Sensor loop directory: {sensor_loop_dir}")
 
     # Case metadata
     case_names = {"a": "easy-axis", "b": "45-degree", "c": "hard-axis"}
-    print(
+    logger.info(
         f"\n[CASES] Evaluating: {', '.join([f'{c} ({case_names[c]})' for c in cases])}"
     )
 
     # List existing output files for user reference
-    print("\n[CONTENT] Existing output files (.png and .dat):")
+    logger.info("\n[CONTENT] Existing output files (.png and .dat):")
     output_files = [
         item.name
         for item in sorted(sensor_loop_dir.iterdir())
@@ -957,14 +937,14 @@ Examples:
     ]
     if output_files:
         for fname in output_files:
-            print(f"  • {fname}")
+            logger.info(f"  • {fname}")
     else:
-        print("  (none yet)")
+        logger.info("  (none yet)")
 
     # Step A: Concatenate down/up sweep data for each case
-    print("\n" + "-" * 80)
-    print("SENSOR-EXAMPLE, STEP A: Concatenate Down- and Up-Sweep Data")
-    print("-" * 80)
+    logger.info("\n" + "-" * 80)
+    logger.info("SENSOR-EXAMPLE, STEP A: Concatenate Down- and Up-Sweep Data")
+    logger.info("-" * 80)
     concatenated_count = 0
     for case in cases:
         down_file = (
@@ -979,32 +959,32 @@ Examples:
         if not down_file.exists() or not up_file.exists():
             down_status = "✓" if down_file.exists() else "✗"
             up_status = "✓" if up_file.exists() else "✗"
-            print(
+            logger.info(
                 f"  [SKIP] Case {case}: down-sweep {down_status}, up-sweep {up_status}"
             )
             continue
 
-        print(f"  [DATA] Case {case}: Merging down- and up-sweep → {output_file.name}")
+        logger.info(f"  [DATA] Case {case}: Merging down- and up-sweep → {output_file.name}")
         concatenate_sensor_data(down_file, up_file, output_file)
         concatenated_count += 1
 
     if concatenated_count == 0:
-        print("No data files were concatenated. Check simulation results.")
+        logger.info("No data files were concatenated. Check simulation results.")
         return 1
-    print(f"  [COMPLETE] Concatenated {concatenated_count} case(s)")
+    logger.info(f"  [COMPLETE] Concatenated {concatenated_count} case(s)")
 
     # Step B: Generate plots and perform analysis
-    print("\n" + "-" * 80)
-    print("SENSOR-EXAMPLE, STEP B: Plot and Analyze Hysteresis Loops")
-    print("-" * 80)
+    logger.info("\n" + "-" * 80)
+    logger.info("SENSOR-EXAMPLE, STEP B: Plot and Analyze Hysteresis Loops")
+    logger.info("-" * 80)
     plot_count = 0
     for case in cases:
         output_file = sensor_loop_dir / f"sensor_case-{case}.dat"
         if not output_file.exists():
-            print(f"  [SKIP] No concatenated file for case {case}")
+            logger.info(f"  [SKIP] No concatenated file for case {case}")
             continue
 
-        print(f"\n  Processing case {case} ({case_names[case]}):")
+        logger.info(f"\n  Processing case {case} ({case_names[case]}):")
 
         if case == "a":
             # Easy-axis: look for saturation
@@ -1041,18 +1021,23 @@ Examples:
             )
         plot_count += 1
 
-    print(f"\n  [COMPLETE] Generated {plot_count} plot(s)")
+    logger.info(f"\n  [COMPLETE] Generated {plot_count} plot(s)")
 
-    print("\n" + "=" * 80)
-    print("SENSOR LOOP EVALUATION COMPLETED SUCCESSFULLY")
-    print("=" * 80)
-    print(
+    logger.info("\n" + "=" * 80)
+    logger.info("SENSOR LOOP EVALUATION COMPLETED SUCCESSFULLY")
+    logger.info("=" * 80)
+    logger.info(
         f"[SUMMARY] Processed {concatenated_count} case(s) and generated {plot_count} plot(s)"
     )
-    print("[OUTPUT] .png files saved to sensor_loop_step_by_step/")
-    print("[OUTPUT] .dat files saved to sensor_loop_step_by_step/")
-    print(f"[LOG] Results saved to: {log_file}")
-    print("=" * 80)
+    logger.info("[OUTPUT] .png files saved to sensor_loop_step_by_step/")
+    logger.info("[OUTPUT] .dat files saved to sensor_loop_step_by_step/")
+    logger.info(f"[LOG] Results saved to: {log_file}")
+    logger.info("=" * 80)
+    
+    # Flush handlers to ensure all content is written to log file
+    for handler in logger.handlers:
+        handler.flush()
+    
     return 0
 
 
