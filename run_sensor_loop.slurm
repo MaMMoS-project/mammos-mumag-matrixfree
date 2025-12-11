@@ -115,7 +115,7 @@ mkdir examples/
 cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/ ./examples/
 cp -r $SLURM_SUBMIT_DIR/*.py .
 cp -r $SLURM_SUBMIT_DIR/*.npz .
-cp -r $SLURM_SUBMIT_DIR/*.yml .
+# cp -r $SLURM_SUBMIT_DIR/*.yml .
 
 # ============================================================================
 # RUN SIMULATIONS
@@ -153,6 +153,14 @@ cp ./examples/sensor_loop_step_by_step/sensor_case-c_down/sensor.p2 $SLURM_SUBMI
 cp ./examples/sensor_loop_step_by_step/sensor_case-a_down/*.vtu $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_down/
 cp ./examples/sensor_loop_step_by_step/sensor_case-b_down/*.vtu $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-b_down/
 cp ./examples/sensor_loop_step_by_step/sensor_case-c_down/*.vtu $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-c_down/
+# Copy all sensor.p2 files back 
+cp ./examples/sensor_loop_step_by_step/sensor_case-a_down/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_down/
+cp ./examples/sensor_loop_step_by_step/sensor_case-a_up/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_up/
+cp ./examples/sensor_loop_step_by_step/sensor_case-b_down/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-b_down/
+cp ./examples/sensor_loop_step_by_step/sensor_case-b_up/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-b_up/
+cp ./examples/sensor_loop_step_by_step/sensor_case-c_down/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-c_down/
+cp ./examples/sensor_loop_step_by_step/sensor_case-c_up/sensor.p2 $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-c_up/
+
 # Number changes with settings in .p2 cp ./examples/sensor_loop_step_by_step/sensor_case-a_down/sensor.0002.state.npz $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/sensor_case-a_down/
 
 cp ./examples/sensor_loop_step_by_step/*.dat $SLURM_SUBMIT_DIR/examples/sensor_loop_step_by_step/
