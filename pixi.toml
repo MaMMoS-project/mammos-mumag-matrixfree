@@ -16,8 +16,8 @@ matplotlib = ">=3.10.7,<4"
 pyamg = ">=5.3.0,<6"
 meshio = ">=5.3.5,<6"
 meshpy = ">=2025.1.1,<2026"
-neper = "*"
-povray = "*"
+# neper = "*"
+# povray = "*"
 
 [pypi-dependencies]
 jax = { version = ">=0.8.1, <0.9", extras = ["cuda12"] }
