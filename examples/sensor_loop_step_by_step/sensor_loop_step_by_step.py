@@ -80,6 +80,46 @@ def copy_state(
     shutil.copy(src, dst)
 
 
+def set_p2_params(directory: Path, updates: dict[str, str]) -> None:
+    """Force-set parameters in a sensor.p2 file within a directory.
+
+    Ensures keys like 'ini' and 'hstep' are updated reliably regardless of spacing.
+
+    Args:
+        directory: Directory containing the sensor.p2 file
+        updates: Mapping of parameter names to string values (without spaces)
+    """
+    p2_file = directory / "sensor.p2"
+    if not p2_file.exists():
+        print(f"  [WARNING] sensor.p2 not found in {directory.name}, cannot update {list(updates.keys())}")
+        return
+
+    with open(p2_file, "r") as f:
+        lines = f.readlines()
+
+    keys = set(updates.keys())
+    new_lines: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        stripped = line.strip()
+        replaced = False
+        for k in keys:
+            if stripped.startswith(f"{k} ="):
+                new_lines.append(f"{k} = {updates[k]}\n")
+                seen.add(k)
+                replaced = True
+                break
+        if not replaced:
+            new_lines.append(line)
+
+    # Append any missing keys at the end to ensure presence
+    for k in keys - seen:
+        new_lines.append(f"{k} = {updates[k]}\n")
+
+    with open(p2_file, "w") as f:
+        f.writelines(new_lines)
+
+
 def update_hstep_in_folders(directories: list[Path], new_hstep_abs: float) -> None:
     """Update the hstep value in sensor.p2 files across multiple directories.
     
@@ -452,55 +492,15 @@ Examples:
         # Check and update .p2 file in up-case directory:
         # 1. Verify ini parameter matches the copied state file number
         # 2. Set hstep based on run_minimal_example configuration
-        p2_file = udir / "sensor.p2"
-        if p2_file.exists():
-            with open(p2_file, "r") as f:
-                lines = f.readlines()
+        # Determine expected values
+        expected_ini_value = down_result_state.split(".")[1]
+        expected_hstep = "0.003" if run_minimal_example else "0.00005"
 
-            # Determine expected values
-            expected_ini_value = down_result_state.split(".")[1]
-            expected_hstep = "0.003" if run_minimal_example else "0.00005"
-
-            # Check current values
-            ini_line = next(
-                (line for line in lines if line.strip().startswith("ini =")), None
-            )
-            hstep_line = next(
-                (line for line in lines if line.strip().startswith("hstep =")), None
-            )
-
-            needs_update = False
-            if ini_line:
-                ini_value = ini_line.split("=")[1].strip()
-                if ini_value != expected_ini_value:
-                    print(
-                        f"  [WARNING] Mismatch in .p2 file: ini = {ini_value} but expected {expected_ini_value}"
-                    )
-                    needs_update = True
-
-            if hstep_line:
-                hstep_value = hstep_line.split("=")[1].strip()
-                if hstep_value != expected_hstep:
-                    print(
-                        f"  [INFO] Updating hstep from {hstep_value} to {expected_hstep} ({'minimal' if run_minimal_example else 'full'} example)"
-                    )
-                    needs_update = True
-
-            # Update .p2 file if needed
-            if needs_update or ini_line or hstep_line:
-                print(
-                    f"  [UPDATE] Updating .p2 file: ini = {expected_ini_value}, hstep = {expected_hstep}"
-                )
-                new_lines = []
-                for line in lines:
-                    if line.strip().startswith("ini ="):
-                        new_lines.append(f"ini = {expected_ini_value}\n")
-                    elif line.strip().startswith("hstep ="):
-                        new_lines.append(f"hstep = {expected_hstep}\n")
-                    else:
-                        new_lines.append(line)
-                with open(p2_file, "w") as f:
-                    f.writelines(new_lines)
+        # Force-set .p2 parameters robustly
+        print(
+            f"  [UPDATE] Setting .p2 params: ini = {expected_ini_value}, hstep = {expected_hstep}"
+        )
+        set_p2_params(udir, {"ini": expected_ini_value, "hstep": expected_hstep})
 
         # Step5/8/11: run up-case
         print("\n" + "=" * 80)
