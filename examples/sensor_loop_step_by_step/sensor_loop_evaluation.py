@@ -665,6 +665,9 @@ Examples:
   # Run full evaluation on cases a, b, c
   %(prog)s
   
+  # Run only cases a and c (skip case b)
+  %(prog)s --cases a c
+  
   # Plot easy-axis hysteresis from custom file
   %(prog)s --plot-a /path/to/data.dat --output-dir ./plots
   
@@ -718,6 +721,13 @@ Examples:
         type=Path,
         metavar="FILE",
         help="Up-sweep-only data file for saturation detection (default: same as --plot-a)",
+    )
+    parser.add_argument(
+        "--cases",
+        nargs="+",
+        choices=["a", "b", "c"],
+        metavar="CASE",
+        help="Run only specified cases: a (easy-axis), b (45-degree), c (hard-axis). Default: all (a b c)",
     )
     
     args = parser.parse_args()
@@ -894,7 +904,7 @@ Examples:
     # =====================================================================
     # USER CONFIGURATION
     # =====================================================================
-    cases = ["a", "b", "c"]  # Choose any subset of ["a", "b", "c"]
+    cases = args.cases if args.cases else ["a", "b", "c"]  # Use command-line arg or default to all
     plot_xlim = tuple(args.xlim) if args.xlim else (-15, 15)  # X-axis limits for plots in kA/m
     window_half_width = 2.5  # Fixed benchmark window for sensitivities (case c)
     min_window_points = 5  # Minimum points needed in linear window (case c)
