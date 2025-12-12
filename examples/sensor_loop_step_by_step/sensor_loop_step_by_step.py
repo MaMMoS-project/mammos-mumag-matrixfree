@@ -37,7 +37,7 @@ def run_loop(loop_cmd: list[str], cwd: Path) -> None:
     subprocess.run(cmd, check=True)
 
 
-def standardize_state_file_names(directory: Path, simulation_name: str = "sensor") -> None:
+def standardize_state_file_names(directory: Path, backup_name: str, simulation_name: str = "sensor") -> None:
     """Rename backup state files to match the simulation name.
     
     For example, if simulation is called 'sensor', rename files like:
@@ -48,6 +48,7 @@ def standardize_state_file_names(directory: Path, simulation_name: str = "sensor
 
     Args:
         directory: Directory containing state files
+        backup_name: The specific backup file name to standardize (if provided)
         simulation_name: Expected simulation name prefix (default: "sensor")
     """
     import re
@@ -59,7 +60,13 @@ def standardize_state_file_names(directory: Path, simulation_name: str = "sensor
     pattern = r'^(.+)\.(\d+)\.state\.npz$'
     renamed_count = 0
     
-    for state_file in sorted(directory.glob("*.state.npz")):
+    # If backup_name is specified, only standardize that specific file
+    if backup_name:
+        state_files = [directory / backup_name] if (directory / backup_name).exists() else []
+    else:
+        state_files = sorted(directory.glob("*.state.npz"))
+    
+    for state_file in state_files:
         match = re.match(pattern, state_file.name)
         if not match:
             continue
@@ -510,29 +517,47 @@ Examples:
     
     if args.load_initial_state:
         print("[SIMULATION] Loading pre-computed initial state (--load-initial-state)...")
+        print("[WARNING] ⚠️  MESH COMPATIBILITY CHECK REQUIRED:")
+        print("[WARNING]     The mesh from the loaded initial state must EXACTLY match the current simulation mesh.")
+        print("[WARNING]     If meshes differ (different resolution, geometry, etc.), the simulation will produce incorrect results.")
+        print("[WARNING]     Verify that you're using the same mesh configuration as when the initial state was computed.")
+        
         # Expect initial state file to already exist in sensor_initial_state directory
         try:
             if args.initial_state_file:
                 # Check if the specified file exists (before standardization)
                 initial_state_path = initial_dir / args.initial_state_file
                 if initial_state_path.exists():
-                    initial_state_name = args.initial_state_file
-                    print(f"  [STATE] Using specified file: {initial_state_name}")
+                    print(f"  [STATE] Found specified file: {args.initial_state_file}")
+                    # Standardize the file if needed
+                    print("[STANDARDIZE] Checking for backup state files...")
+                    standardize_state_file_names(initial_dir, backup_name=args.initial_state_file, simulation_name="sensor")
+                    # After standardization, determine the actual filename to use
+                    # Extract step number from original filename and construct standardized name
+                    import re
+                    match = re.match(r'^(.+)\.(\d+)\.state\.npz$', args.initial_state_file)
+                    if match:
+                        step_number = match.group(2)
+                        initial_state_name = f"sensor.{step_number}.state.npz"
+                        if initial_state_name != args.initial_state_file:
+                            print(f"  [STANDARDIZED] {args.initial_state_file} → {initial_state_name}")
+                    else:
+                        # Couldn't parse; assume it's already correct
+                        initial_state_name = args.initial_state_file
                 else:
-                    # File doesn't exist; raise error with helpful message
+                    # File doesn't exist with the specified name
                     raise FileNotFoundError(f"Specified initial state file not found: {initial_state_path}")
             else:
                 # No specific file requested; standardize any backup files and find the latest
                 print("[STANDARDIZE] Checking for backup state files...")
-                standardize_state_file_names(initial_dir, "sensor")
+                standardize_state_file_names(initial_dir, backup_name=None, simulation_name="sensor")
                 initial_state_name = find_last_state_file(initial_dir)
             print(f"[RESULT] ✓ Loaded initial state: {initial_state_name}")
         except FileNotFoundError as e:
             print(f"[ERROR] {e}")
-            # If a specific file was requested, suggest standardization
+            # If a specific file was requested, suggest checking the directory
             if args.initial_state_file:
                 print("[SUGGESTION] Check that the file exists in the sensor_initial_state directory.")
-                print("[SUGGESTION] If you have a backup file (e.g., backup_sensor.XXXX.state.npz), rename it to sensor.XXXX.state.npz")
             else:
                 print("[ERROR] No pre-computed initial state found. Run without --load-initial-state to compute it.")
             return 1
