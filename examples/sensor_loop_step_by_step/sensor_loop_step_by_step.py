@@ -500,10 +500,11 @@ Examples:
 
         # Check and update .p2 file in up-case directory:
         # 1. Verify ini parameter matches the copied state file number
-        # 2. Set hstep based on run_minimal_example configuration
+        # 2. Set hstep: use externally specified value if provided, otherwise default to 0.003
         # Determine expected values
         expected_ini_value = down_result_state.split(".")[1]
-        expected_hstep = "0.003" if run_minimal_example else "0.00005"
+        # Use args.hstep if specified via CLI, otherwise default to 0.003
+        expected_hstep = str(args.hstep) if args.hstep is not None else "0.003"
 
         # Force-set .p2 parameters robustly
         print(
