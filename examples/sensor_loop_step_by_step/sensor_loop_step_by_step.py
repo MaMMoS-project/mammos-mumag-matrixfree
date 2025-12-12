@@ -259,6 +259,11 @@ Examples:
         metavar="VALUE",
         help="Update hstep value in all sensor_case-*_* folders (preserves sign)",
     )
+    parser.add_argument(
+        "--only-hstep",
+        action="store_true",
+        help="Only update hstep across folders and exit (do not run simulations)",
+    )
 
     args = parser.parse_args()
 
@@ -327,7 +332,11 @@ Examples:
             # Update hstep in all folders
             update_hstep_in_folders(all_sensor_dirs, args.hstep)
             
-            print("[INFO] Continuing with simulation workflow...\n")
+            if args.only_hstep:
+                print("[INFO] --only-hstep specified; exiting after hstep update.")
+                return 0
+            else:
+                print("[INFO] Continuing with simulation workflow...\n")
 
     # Step0.1: select coarse or fine mesh, newly generate mesh if needed
     #   + coarse mesh: python src/mesh.py --geom eye --extent 3.5,1.0,0.01 --h 0.03 --backend meshpy --out-name eye_meshpy --verbose
