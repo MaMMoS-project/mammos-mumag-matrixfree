@@ -483,7 +483,7 @@ Examples:
             f"SENSOR-EXAMPLE, STEP {3 * idx}: DOWN-SWEEP - Case {s.upper()} ({case_names[s]})"
         )
         print("=" * 80)
-        print(f"[SIMULATION] Running decreasing field sweep...")
+        print("[SIMULATION] Running decreasing field sweep...")
         run_loop(loop_cmd_in_main, ddir)
 
         # Find the last state file from down-case computation
@@ -496,7 +496,7 @@ Examples:
         print("-" * 80)
         print(f"[COPY] {down_result_state} → case up-{s}")
         copy_state(ddir, down_result_state, udir)
-        print(f"[COPY] ✓ State transferred to up-case")
+        print("[COPY] ✓ State transferred to up-case")
 
         # Check and update .p2 file in up-case directory:
         # 1. Verify ini parameter matches the copied state file number
@@ -518,7 +518,7 @@ Examples:
             f"SENSOR-EXAMPLE, STEP {3 * idx + 2}: UP-SWEEP - Case {s.upper()} ({case_names[s]})"
         )
         print("=" * 80)
-        print(f"[SIMULATION] Running increasing field sweep...")
+        print("[SIMULATION] Running increasing field sweep...")
         run_loop(loop_cmd_in_main, udir)
         print(f"[RESULT] ✓ Up-sweep completed for case {s}")
 
