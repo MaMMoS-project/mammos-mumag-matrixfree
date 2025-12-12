@@ -305,6 +305,9 @@ Examples:
   # Load a specific initial state file by name
   python sensor_loop_step_by_step.py --initial-state-file sensor.0050.state.npz
   
+    # Only compute or load the initial state and exit
+    python sensor_loop_step_by_step.py --only-compute-initial-state
+  
   # Load initial state with backup mesh file
   python sensor_loop_step_by_step.py --initial-state-file backup_sensor.0050.state.npz --initial-mesh-file sensor_backup.npz
         """,
@@ -356,6 +359,11 @@ Examples:
         "--load-initial-state",
         action="store_true",
         help="Load pre-computed initial state instead of computing it (skips Step 1)",
+    )
+    parser.add_argument(
+        "--only-compute-initial-state",
+        action="store_true",
+        help="Only compute or load the initial state and exit (skip distribution and sweeps)",
     )
     parser.add_argument(
         "--initial-state-file",
@@ -639,6 +647,14 @@ Examples:
         # Find the last state file from initial computation
         initial_state_name = find_last_state_file(initial_dir)
         print(f"[RESULT] ✓ Initial state saved as: {initial_state_name}")
+
+    # Optional early exit: only compute or load the initial state
+    if args.only_compute_initial_state:
+        print("\n" + "=" * 80)
+        print("ONLY-COMPUTE-INITIAL-STATE MODE")
+        print("=" * 80)
+        print(f"[INFO] Exiting after initial state. Directory: {initial_dir}")
+        return 0
 
     # Step2: copy the last state file containing the information of the computed equilibrium
     # from "sensor_initial_state" to
