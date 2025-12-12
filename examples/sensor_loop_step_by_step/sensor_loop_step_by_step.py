@@ -86,6 +86,36 @@ def standardize_state_file_names(directory: Path, backup_name: str, simulation_n
         print(f"[RENAME] ✓ Standardized {renamed_count} state file(s) to '{simulation_name}' prefix")
 
 
+def standardize_mesh_file_name(directory: Path, backup_mesh_name: str = None, simulation_name: str = "sensor") -> None:
+    """Rename backup mesh file to match the simulation name.
+    
+    For example, if simulation is called 'sensor', rename:
+    - sensor_backup.npz → sensor.npz
+    - other_mesh.npz → sensor.npz
+    
+    Args:
+        directory: Directory containing mesh files
+        backup_mesh_name: The specific backup mesh file name (if provided)
+        simulation_name: Expected simulation name (default: "sensor")
+    """
+    expected_name = f"{simulation_name}.npz"
+    
+    if not directory.exists():
+        return
+    
+    # If backup_mesh_name is specified, use that; otherwise look for any .npz file that's not the expected name
+    if backup_mesh_name:
+        backup_mesh_path = directory / backup_mesh_name
+        if backup_mesh_path.exists() and backup_mesh_name != expected_name:
+            new_path = directory / expected_name
+            # Remove existing mesh if present
+            if new_path.exists():
+                new_path.unlink()
+            backup_mesh_path.rename(new_path)
+            print(f"  [RENAME] {backup_mesh_name} → {expected_name}")
+            print(f"[RENAME] ✓ Standardized mesh file to '{simulation_name}.npz'")
+
+
 def find_last_state_file(directory: Path) -> str:
     """Find the last state file with format sensor.XXXX.state.npz and highest number XXXX.
 
@@ -274,6 +304,9 @@ Examples:
   
   # Load a specific initial state file by name
   python sensor_loop_step_by_step.py --initial-state-file sensor.0050.state.npz
+  
+  # Load initial state with backup mesh file
+  python sensor_loop_step_by_step.py --initial-state-file backup_sensor.0050.state.npz --initial-mesh-file sensor_backup.npz
         """,
     )
     parser.add_argument(
@@ -329,6 +362,13 @@ Examples:
         type=str,
         metavar="FILENAME",
         help="Specific initial state file to load (e.g., sensor.0050.state.npz); automatically enables --load-initial-state",
+    )
+    parser.add_argument(
+        "--initial-mesh-file",
+        type=str,
+        metavar="FILENAME",
+        default="backup_mesh_sensor.npz",
+        help="Backup mesh file to use with initial state (default, backup_mesh_sensor.npz); will be renamed to sensor.npz",
     )
 
     args = parser.parse_args()
@@ -415,44 +455,50 @@ Examples:
     print("SENSOR-EXAMPLE, STEP 0.1: Mesh Selection and Generation")
     print("-" * 80)
 
-    # Derive mesh type from user configuration
-    use_fine_mesh = not run_minimal_example
-
-    if use_fine_mesh:
-        mesh_file_name = "sensor_fine_mesh.npz"
-        mesh_type = "FINE (h=" + str(mesh_size_fine) + ")"
+    # Skip mesh generation if backup mesh will be provided for initial state
+    if args.initial_mesh_file:
+        print("[MESH] Skipping mesh generation (backup mesh will be used with initial state)")
+        print(f"[MESH] Backup mesh file: {args.initial_mesh_file}")
+        mesh_file_name = None  # Will not be used for distribution
     else:
-        mesh_file_name = "sensor_coarse_mesh.npz"
-        mesh_type = "COARSE (h=" + str(mesh_size_coarse) + ")"
-    print(f"[MESH] Type: {mesh_type}")
-    print(f"[MESH] File: {mesh_file_name}")
-    print(
-        f"[MESH] Mode: {'Generate new mesh' if not use_existing_mesh else 'Use existing mesh'}"
-    )
+        # Derive mesh type from user configuration
+        use_fine_mesh = not run_minimal_example
 
-    if not use_existing_mesh:
-        mesh_script = (base / "src/mesh.py").resolve()
-        mesh_gen_cmd = [
-            "python",
-            str(mesh_script),
-            "--geom",
-            "eye",
-            "--extent",
-            "3.5,1.0,0.01",
-            "--backend",
-            "meshpy",
-            "--out-name",
-            mesh_file_name.replace(".npz", ""),
-        ]
         if use_fine_mesh:
-            mesh_gen_cmd.extend(["--h", str(mesh_size_fine)])
+            mesh_file_name = "sensor_fine_mesh.npz"
+            mesh_type = "FINE (h=" + str(mesh_size_fine) + ")"
         else:
-            mesh_gen_cmd.extend(["--h", str(mesh_size_coarse)])
-        # mesh_gen_cmd.append("--verbose")
-        print("\n[MESH GENERATION] Starting mesh generation...")
-        print(f"[COMMAND] {' '.join(mesh_gen_cmd)}")
-        subprocess.run(mesh_gen_cmd, check=True)
-        print("[MESH GENERATION] ✓ Mesh generated successfully")
+            mesh_file_name = "sensor_coarse_mesh.npz"
+            mesh_type = "COARSE (h=" + str(mesh_size_coarse) + ")"
+        print(f"[MESH] Type: {mesh_type}")
+        print(f"[MESH] File: {mesh_file_name}")
+        print(
+            f"[MESH] Mode: {'Generate new mesh' if not use_existing_mesh else 'Use existing mesh'}"
+        )
+
+        if not use_existing_mesh:
+            mesh_script = (base / "src/mesh.py").resolve()
+            mesh_gen_cmd = [
+                "python",
+                str(mesh_script),
+                "--geom",
+                "eye",
+                "--extent",
+                "3.5,1.0,0.01",
+                "--backend",
+                "meshpy",
+                "--out-name",
+                mesh_file_name.replace(".npz", ""),
+            ]
+            if use_fine_mesh:
+                mesh_gen_cmd.extend(["--h", str(mesh_size_fine)])
+            else:
+                mesh_gen_cmd.extend(["--h", str(mesh_size_coarse)])
+            # mesh_gen_cmd.append("--verbose")
+            print("\n[MESH GENERATION] Starting mesh generation...")
+            print(f"[COMMAND] {' '.join(mesh_gen_cmd)}")
+            subprocess.run(mesh_gen_cmd, check=True)
+            print("[MESH GENERATION] ✓ Mesh generated successfully")
 
     # Define case names for display purposes
     case_names = {"a": "easy-axis", "b": "45-degree", "c": "hard-axis"}
@@ -466,16 +512,23 @@ Examples:
     up_dirs = {s: sensor_loop_dir / f"sensor_case-{s}_up" for s in cases}
 
     # Copy mesh file to the initial-state and all case directories and rename it to "sensor.npz"
-    print("\n[MESH DISTRIBUTION] Copying mesh to all case directories...")
-    for d in [initial_dir] + list(down_dirs.values()) + list(up_dirs.values()):
-        mesh_dst = d / "sensor.npz"
-        mesh_src = base / mesh_file_name
-        if not mesh_src.exists():
-            raise FileNotFoundError(f"Mesh file not found: {mesh_src}")
-        mesh_dst.parent.mkdir(parents=True, exist_ok=True)
-        print(f"  → {d.name}/sensor.npz")
-        shutil.copy(mesh_src, mesh_dst)
-    print("[MESH DISTRIBUTION] ✓ Mesh copied to all directories")
+    # Skip this step if backup mesh will be provided (only for initial_dir)
+    if not args.initial_mesh_file:
+        print("\n[MESH DISTRIBUTION] Copying mesh to all case directories...")
+        for d in [initial_dir] + list(down_dirs.values()) + list(up_dirs.values()):
+            mesh_dst = d / "sensor.npz"
+            mesh_src = base / mesh_file_name
+            if not mesh_src.exists():
+                raise FileNotFoundError(f"Mesh file not found: {mesh_src}")
+            mesh_dst.parent.mkdir(parents=True, exist_ok=True)
+            print(f"  → {d.name}/sensor.npz")
+            shutil.copy(mesh_src, mesh_dst)
+        print("[MESH DISTRIBUTION] ✓ Mesh copied to all directories")
+    else:
+        print("\n[MESH DISTRIBUTION] Copying mesh to case directories (excluding initial_dir)...")
+        # For down and up dirs, we still need to copy from initial_dir after the backup mesh is standardized
+        # This will be handled in Step 2 along with the state file
+        print("[MESH DISTRIBUTION] Initial directory will use backup mesh; case directories will be populated after Step 1")
 
     loop_script = (base / "src/loop.py").resolve()
 
@@ -521,6 +574,17 @@ Examples:
         print("[WARNING]     The mesh from the loaded initial state must EXACTLY match the current simulation mesh.")
         print("[WARNING]     If meshes differ (different resolution, geometry, etc.), the simulation will produce incorrect results.")
         print("[WARNING]     Verify that you're using the same mesh configuration as when the initial state was computed.")
+        
+        # Handle backup mesh file if provided
+        if args.initial_mesh_file:
+            backup_mesh_path = initial_dir / args.initial_mesh_file
+            if backup_mesh_path.exists():
+                print(f"  [MESH] Found backup mesh file: {args.initial_mesh_file}")
+                print("[STANDARDIZE] Renaming backup mesh file...")
+                standardize_mesh_file_name(initial_dir, backup_mesh_name=args.initial_mesh_file, simulation_name="sensor")
+            else:
+                print(f"[ERROR] Specified backup mesh file not found: {backup_mesh_path}")
+                return 1
         
         # Expect initial state file to already exist in sensor_initial_state directory
         try:
@@ -577,6 +641,21 @@ Examples:
     print("\n" + "=" * 80)
     print("SENSOR-EXAMPLE, STEP 2: Distribute Initial State to Down-Cases")
     print("=" * 80)
+    
+    # If backup mesh was used, also copy the mesh from initial_dir to case directories
+    if args.initial_mesh_file:
+        print("[MESH DISTRIBUTION] Copying standardized mesh from initial_dir to case directories...")
+        mesh_src = initial_dir / "sensor.npz"
+        if not mesh_src.exists():
+            print(f"[ERROR] Standardized mesh not found in initial_dir: {mesh_src}")
+            return 1
+        for d in list(down_dirs.values()) + list(up_dirs.values()):
+            mesh_dst = d / "sensor.npz"
+            mesh_dst.parent.mkdir(parents=True, exist_ok=True)
+            print(f"  → {d.name}/sensor.npz")
+            shutil.copy(mesh_src, mesh_dst)
+        print("[MESH DISTRIBUTION] ✓ Mesh copied to all case directories")
+    
     for s, ddir in down_dirs.items():
         print(f"[COPY] {initial_state_name} → case down-{s} ({case_names[s]})")
         copy_state(initial_dir, initial_state_name, ddir)
