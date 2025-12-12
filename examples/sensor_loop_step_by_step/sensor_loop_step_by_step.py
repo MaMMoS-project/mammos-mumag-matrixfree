@@ -295,6 +295,9 @@ Examples:
   # Run with custom mesh sizes
   python sensor_loop_step_by_step.py --minimal --mesh-size-coarse 0.02
   python sensor_loop_step_by_step.py --mesh-size-fine 0.01
+
+    # Directly specify mesh element size h (overrides coarse/fine)
+    python sensor_loop_step_by_step.py --mesh-h 0.0125
   
   # Update hstep in all sensor_case-*_* folders
   python sensor_loop_step_by_step.py --hstep 0.003
@@ -343,6 +346,12 @@ Examples:
         default=0.005,
         metavar="SIZE",
         help="Fine mesh element size in mesh units (default: 0.005)",
+    )
+    parser.add_argument(
+        "--mesh-h",
+        type=float,
+        metavar="SIZE",
+        help="Direct mesh element size in mesh units; overrides coarse/fine presets",
     )
     parser.add_argument(
         "--hstep",
@@ -462,7 +471,7 @@ Examples:
             else:
                 print("[INFO] Continuing with simulation workflow...\n")
 
-    # Step0.1: select coarse or fine mesh, newly generate mesh if needed
+    # Step0.1: select coarse, fine, or custom mesh h, newly generate mesh if needed
     #   + coarse mesh: python src/mesh.py --geom eye --extent 3.5,1.0,0.01 --h 0.03 --backend meshpy --out-name eye_meshpy --verbose
     #   + fine mesh: python src/mesh.py --geom eye --extent 3.5,1.0,0.01 --h 0.005 --backend meshpy --out-name eye_meshpy --verbose
     print("\n" + "-" * 80)
@@ -475,15 +484,19 @@ Examples:
         print(f"[MESH] Backup mesh file: {args.initial_mesh_file}")
         mesh_file_name = None  # Will not be used for distribution
     else:
-        # Derive mesh type from user configuration
-        use_fine_mesh = not run_minimal_example
-
-        if use_fine_mesh:
-            mesh_file_name = "sensor_fine_mesh.npz"
-            mesh_type = "FINE (h=" + str(mesh_size_fine) + ")"
+        # Derive mesh type from user configuration or custom h
+        custom_h = args.mesh_h
+        if custom_h is not None:
+            mesh_file_name = "sensor_custom_mesh.npz"
+            mesh_type = "CUSTOM (h=" + str(custom_h) + ")"
         else:
-            mesh_file_name = "sensor_coarse_mesh.npz"
-            mesh_type = "COARSE (h=" + str(mesh_size_coarse) + ")"
+            use_fine_mesh = not run_minimal_example
+            if use_fine_mesh:
+                mesh_file_name = "sensor_fine_mesh.npz"
+                mesh_type = "FINE (h=" + str(mesh_size_fine) + ")"
+            else:
+                mesh_file_name = "sensor_coarse_mesh.npz"
+                mesh_type = "COARSE (h=" + str(mesh_size_coarse) + ")"
         print(f"[MESH] Type: {mesh_type}")
         print(f"[MESH] File: {mesh_file_name}")
         print(
@@ -504,10 +517,13 @@ Examples:
                 "--out-name",
                 mesh_file_name.replace(".npz", ""),
             ]
-            if use_fine_mesh:
-                mesh_gen_cmd.extend(["--h", str(mesh_size_fine)])
+            if custom_h is not None:
+                mesh_gen_cmd.extend(["--h", str(custom_h)])
             else:
-                mesh_gen_cmd.extend(["--h", str(mesh_size_coarse)])
+                if 'use_fine_mesh' in locals() and use_fine_mesh:
+                    mesh_gen_cmd.extend(["--h", str(mesh_size_fine)])
+                else:
+                    mesh_gen_cmd.extend(["--h", str(mesh_size_coarse)])
             # mesh_gen_cmd.append("--verbose")
             print("\n[MESH GENERATION] Starting mesh generation...")
             print(f"[COMMAND] {' '.join(mesh_gen_cmd)}")
