@@ -37,6 +37,48 @@ def run_loop(loop_cmd: list[str], cwd: Path) -> None:
     subprocess.run(cmd, check=True)
 
 
+def standardize_state_file_names(directory: Path, simulation_name: str = "sensor") -> None:
+    """Rename backup state files to match the simulation name.
+    
+    For example, if simulation is called 'sensor', rename files like:
+    - sensor_backup.0050.state.npz → sensor.0050.state.npz
+    - other_prefix.0050.state.npz → sensor.0050.state.npz
+    
+    This ensures that state files loaded from external sources have consistent naming.
+
+    Args:
+        directory: Directory containing state files
+        simulation_name: Expected simulation name prefix (default: "sensor")
+    """
+    import re
+    
+    if not directory.exists():
+        return
+    
+    # Find all .state.npz files with any prefix
+    pattern = r'^(.+)\.(\d+)\.state\.npz$'
+    renamed_count = 0
+    
+    for state_file in sorted(directory.glob("*.state.npz")):
+        match = re.match(pattern, state_file.name)
+        if not match:
+            continue
+        
+        current_prefix = match.group(1)
+        step_number = match.group(2)
+        expected_name = f"{simulation_name}.{step_number}.state.npz"
+        
+        # Only rename if prefix doesn't match the simulation name
+        if current_prefix != simulation_name:
+            new_path = directory / expected_name
+            state_file.rename(new_path)
+            print(f"  [RENAME] {state_file.name} → {expected_name}")
+            renamed_count += 1
+    
+    if renamed_count > 0:
+        print(f"[RENAME] ✓ Standardized {renamed_count} state file(s) to '{simulation_name}' prefix")
+
+
 def find_last_state_file(directory: Path) -> str:
     """Find the last state file with format sensor.XXXX.state.npz and highest number XXXX.
 
@@ -219,6 +261,12 @@ Examples:
   
   # Update hstep in all sensor_case-*_* folders
   python sensor_loop_step_by_step.py --hstep 0.003
+  
+  # Load pre-computed initial state instead of computing
+  python sensor_loop_step_by_step.py --load-initial-state
+  
+  # Load a specific initial state file by name
+  python sensor_loop_step_by_step.py --load-initial-state --initial-state-file sensor.0050.state.npz
         """,
     )
     parser.add_argument(
@@ -263,6 +311,17 @@ Examples:
         "--only-hstep",
         action="store_true",
         help="Only update hstep across folders and exit (do not run simulations)",
+    )
+    parser.add_argument(
+        "--load-initial-state",
+        action="store_true",
+        help="Load pre-computed initial state instead of computing it (skips Step 1)",
+    )
+    parser.add_argument(
+        "--initial-state-file",
+        type=str,
+        metavar="FILENAME",
+        help="Specific initial state file to load (e.g., sensor.0050.state.npz); requires --load-initial-state",
     )
 
     args = parser.parse_args()
@@ -444,12 +503,35 @@ Examples:
     print("\n" + "=" * 80)
     print("SENSOR-EXAMPLE, STEP 1: Initial Equilibrium Computation")
     print("=" * 80)
-    print("[SIMULATION] Computing initial magnetization state...")
-    run_loop(loop_cmd_in_main, initial_dir)
-
-    # Find the last state file from initial computation
-    initial_state_name = find_last_state_file(initial_dir)
-    print(f"[RESULT] ✓ Initial state saved as: {initial_state_name}")
+    
+    if args.load_initial_state:
+        print("[SIMULATION] Loading pre-computed initial state (--load-initial-state)...")
+        # Standardize any backup state files to match the simulation name
+        print("[STANDARDIZE] Checking for backup state files...")
+        standardize_state_file_names(initial_dir, "sensor")
+        # Expect initial state file to already exist in sensor_initial_state directory
+        try:
+            if args.initial_state_file:
+                # Use specified filename
+                initial_state_path = initial_dir / args.initial_state_file
+                if not initial_state_path.exists():
+                    raise FileNotFoundError(f"Specified initial state file not found: {initial_state_path}")
+                initial_state_name = args.initial_state_file
+                print(f"  [STATE] Using specified file: {initial_state_name}")
+            else:
+                # Find latest state file
+                initial_state_name = find_last_state_file(initial_dir)
+            print(f"[RESULT] ✓ Loaded initial state: {initial_state_name}")
+        except FileNotFoundError as e:
+            print(f"[ERROR] {e}")
+            print("[ERROR] No pre-computed initial state found. Run without --load-initial-state to compute it.")
+            return 1
+    else:
+        print("[SIMULATION] Computing initial magnetization state...")
+        run_loop(loop_cmd_in_main, initial_dir)
+        # Find the last state file from initial computation
+        initial_state_name = find_last_state_file(initial_dir)
+        print(f"[RESULT] ✓ Initial state saved as: {initial_state_name}")
 
     # Step2: copy the last state file containing the information of the computed equilibrium
     # from "sensor_initial_state" to
