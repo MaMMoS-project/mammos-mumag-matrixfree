@@ -510,25 +510,31 @@ Examples:
     
     if args.load_initial_state:
         print("[SIMULATION] Loading pre-computed initial state (--load-initial-state)...")
-        # Standardize any backup state files to match the simulation name
-        print("[STANDARDIZE] Checking for backup state files...")
-        standardize_state_file_names(initial_dir, "sensor")
         # Expect initial state file to already exist in sensor_initial_state directory
         try:
             if args.initial_state_file:
-                # Use specified filename
+                # Check if the specified file exists (before standardization)
                 initial_state_path = initial_dir / args.initial_state_file
-                if not initial_state_path.exists():
+                if initial_state_path.exists():
+                    initial_state_name = args.initial_state_file
+                    print(f"  [STATE] Using specified file: {initial_state_name}")
+                else:
+                    # File doesn't exist; raise error with helpful message
                     raise FileNotFoundError(f"Specified initial state file not found: {initial_state_path}")
-                initial_state_name = args.initial_state_file
-                print(f"  [STATE] Using specified file: {initial_state_name}")
             else:
-                # Find latest state file
+                # No specific file requested; standardize any backup files and find the latest
+                print("[STANDARDIZE] Checking for backup state files...")
+                standardize_state_file_names(initial_dir, "sensor")
                 initial_state_name = find_last_state_file(initial_dir)
             print(f"[RESULT] ✓ Loaded initial state: {initial_state_name}")
         except FileNotFoundError as e:
             print(f"[ERROR] {e}")
-            print("[ERROR] No pre-computed initial state found. Run without --load-initial-state to compute it.")
+            # If a specific file was requested, suggest standardization
+            if args.initial_state_file:
+                print("[SUGGESTION] Check that the file exists in the sensor_initial_state directory.")
+                print("[SUGGESTION] If you have a backup file (e.g., backup_sensor.XXXX.state.npz), rename it to sensor.XXXX.state.npz")
+            else:
+                print("[ERROR] No pre-computed initial state found. Run without --load-initial-state to compute it.")
             return 1
     else:
         print("[SIMULATION] Computing initial magnetization state...")
