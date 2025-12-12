@@ -576,10 +576,11 @@ Examples:
     
     if args.load_initial_state:
         print("[SIMULATION] Loading pre-computed initial state (--load-initial-state)...")
-        print("[WARNING] ⚠️  MESH COMPATIBILITY CHECK REQUIRED:")
-        print("[WARNING]     The mesh from the loaded initial state must EXACTLY match the current simulation mesh.")
-        print("[WARNING]     If meshes differ (different resolution, geometry, etc.), the simulation will produce incorrect results.")
-        print("[WARNING]     Verify that you're using the same mesh configuration as when the initial state was computed.")
+        if args.initial_state_file and not args.initial_mesh_file:
+            print("[WARNING] ⚠️  MESH COMPATIBILITY CHECK REQUIRED:")
+            print("[WARNING]     The mesh from the loaded initial state must EXACTLY match the current simulation mesh.")
+            print("[WARNING]     If meshes differ (different resolution, geometry, etc.), the simulation will produce incorrect results.")
+            print("[WARNING]     Provide --initial-mesh-file to copy the matching mesh alongside the state.")
         
         # Handle backup mesh file if provided
         if args.initial_mesh_file:
