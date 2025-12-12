@@ -92,6 +92,32 @@ def setup_logging(log_dir: Path) -> tuple[logging.Logger, Path]:
     return logger, log_file_path
 
 
+def parse_p2_file(p2_file: Path) -> dict:
+    """Parse .p2 parameter file and extract key parameters.
+
+    Args:
+        p2_file: Path to .p2 parameter file
+
+    Returns:
+        Dict with extracted parameters (hstep, mesh_h, etc.)
+    """
+    import re
+
+    params = {}
+    if not p2_file.exists():
+        return params
+
+    with open(p2_file, "r") as f:
+        for line in f:
+            line = line.strip()
+            # Match lines like "hstep = -0.00025" or "hstep = 0.003"
+            hstep_match = re.match(r'^hstep\s*=\s*([+-]?[0-9.eE+-]+)', line)
+            if hstep_match:
+                params['hstep'] = abs(float(hstep_match.group(1)))  # Store absolute value
+
+    return params
+
+
 def concatenate_sensor_data(down_file: Path, up_file: Path, output_file: Path) -> None:
     """Concatenate down- and up-sweep hysteresis data into a single file.
 
@@ -158,6 +184,7 @@ def plot_sensor_data_a(
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
     logger: logging.Logger | None = None,
+    filename_suffix: str = "",
 ) -> None:
     """Plot easy-axis hysteresis loop and highlight saturation point (M/Ms ≈ 1).
 
@@ -169,6 +196,7 @@ def plot_sensor_data_a(
         xlim: Optional (x_min, x_max) tuple for x-axis limits in kA/m
         ylim: Optional (y_min, y_max) tuple for y-axis limits in M/Ms (default: -1.05, 1.05)
         logger: Optional logger instance for output
+        filename_suffix: Optional suffix to append to output filename (e.g., '_hstep0.003')
     """
     if logger is None:
         logger = logging.getLogger("sensor_loop_evaluation")
@@ -234,7 +262,7 @@ def plot_sensor_data_a(
         plt.ylim(-1.05, 1.05)
     plt.tight_layout()
 
-    save_path = output_file_path / f"sensor_case-a-{figure_name}.png"
+    save_path = output_file_path / f"sensor_case-a-{figure_name}{filename_suffix}.png"
     plt.savefig(save_path.resolve(), dpi=300)
     plt.close()
     logger.info(f"  [PLOT] Saved: {save_path.name}")
@@ -248,6 +276,7 @@ def plot_sensor_data_b(
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
     logger: logging.Logger | None = None,
+    filename_suffix: str = "",
 ) -> None:
     """Plot 45-degree hysteresis loop and highlight coercivity point (M/Ms = 0).
 
@@ -259,6 +288,7 @@ def plot_sensor_data_b(
         xlim: Optional (x_min, x_max) tuple for x-axis limits in kA/m
         ylim: Optional (y_min, y_max) tuple for y-axis limits in M/Ms (default: -1.05, 1.05)
         logger: Optional logger instance for output
+        filename_suffix: Optional suffix to append to output filename (e.g., '_hstep0.003')
     """
     if logger is None:
         logger = logging.getLogger("sensor_loop_evaluation")
@@ -324,7 +354,7 @@ def plot_sensor_data_b(
         plt.ylim(-1.05, 1.05)
     plt.tight_layout()
 
-    save_path = output_file_path / f"sensor_case-b-{figure_name}.png"
+    save_path = output_file_path / f"sensor_case-b-{figure_name}{filename_suffix}.png"
     plt.savefig(save_path.resolve(), dpi=300)
     plt.close()
     logger.info(f"  [PLOT] Saved: {save_path.name}")
@@ -511,6 +541,7 @@ def plot_sensor_data_c(
     window_half_width: float = 2.5,
     min_window_points: int = 5,
     logger: logging.Logger | None = None,
+    filename_suffix: str = "",
 ) -> None:
     """Plot hard-axis hysteresis loop and benchmark sensitivities for sweep c).
 
@@ -535,6 +566,7 @@ def plot_sensor_data_c(
         window_half_width: Half-width of symmetric fit window (default: 2.5 kA/m)
         min_window_points: Minimum points required for linear fit (default: 5)
         logger: Optional logger instance for output
+        filename_suffix: Optional suffix to append to output filename (e.g., '_hstep0.003')
     """
     if logger is None:
         logger = logging.getLogger("sensor_loop_evaluation")
@@ -645,7 +677,7 @@ def plot_sensor_data_c(
         plt.ylim(-1.05, 1.05)
     plt.tight_layout()
 
-    save_path = output_file_path / f"sensor_case-c-{figure_name}.png"
+    save_path = output_file_path / f"sensor_case-c-{figure_name}{filename_suffix}.png"
     plt.savefig(save_path.resolve(), dpi=300)
     plt.close()
     logger.info(f"  [PLOT] Saved: {save_path.name}")
@@ -729,6 +761,17 @@ Examples:
         metavar="CASE",
         help="Run only specified cases: a (easy-axis), b (45-degree), c (hard-axis). Default: all (a b c)",
     )
+    parser.add_argument(
+        "--include-params",
+        action="store_true",
+        help="Include hstep parameter in output filenames (reads from .p2 files)",
+    )
+    parser.add_argument(
+        "--include-mesh-h",
+        type=float,
+        metavar="SIZE",
+        help="Optional mesh element size h to include in output filenames",
+    )
     
     args = parser.parse_args()
 
@@ -767,6 +810,21 @@ Examples:
         logger.info(f"[PLOT]   Figure name: {args.figure_name}")
         logger.info()
         
+        # Extract parameters if requested
+        filename_suffix = ""
+        if args.include_params:
+            # Look for .p2 file in same directory as data_file
+            p2_file = data_file.parent / "sensor.p2"
+            params = parse_p2_file(p2_file)
+            
+            suffix_parts = []
+            if args.include_mesh_h is not None:
+                suffix_parts.append(f"h{args.include_mesh_h:.4g}")
+            if 'hstep' in params:
+                suffix_parts.append(f"hstep{params['hstep']:.4g}")
+            if suffix_parts:
+                filename_suffix = "_" + "_".join(suffix_parts)
+        
         # Plot the data
         plot_sensor_data_a(
             data_file=data_file,
@@ -775,6 +833,7 @@ Examples:
             output_file_path=output_dir,
             xlim=plot_xlim,
             logger=logger,
+            filename_suffix=filename_suffix,
         )
         
         logger.info()
@@ -818,6 +877,21 @@ Examples:
         logger.info(f"[PLOT]   Figure name: {args.figure_name}")
         logger.info()
         
+        # Extract parameters if requested
+        filename_suffix = ""
+        if args.include_params:
+            # Look for .p2 file in same directory as data_file
+            p2_file = data_file.parent / "sensor.p2"
+            params = parse_p2_file(p2_file)
+            
+            suffix_parts = []
+            if args.include_mesh_h is not None:
+                suffix_parts.append(f"h{args.include_mesh_h:.4g}")
+            if 'hstep' in params:
+                suffix_parts.append(f"hstep{params['hstep']:.4g}")
+            if suffix_parts:
+                filename_suffix = "_" + "_".join(suffix_parts)
+        
         # Plot the data
         plot_sensor_data_b(
             data_file=data_file,
@@ -826,6 +900,7 @@ Examples:
             output_file_path=output_dir,
             xlim=plot_xlim,
             logger=logger,
+            filename_suffix=filename_suffix,
         )
         
         logger.info()
@@ -874,6 +949,21 @@ Examples:
         logger.info(f"[PLOT]   Fit window: ±{window_half_width} kA/m")
         logger.info()
         
+        # Extract parameters if requested
+        filename_suffix = ""
+        if args.include_params:
+            # Look for .p2 file in same directory as data_file
+            p2_file = data_file.parent / "sensor.p2"
+            params = parse_p2_file(p2_file)
+            
+            suffix_parts = []
+            if args.include_mesh_h is not None:
+                suffix_parts.append(f"h{args.include_mesh_h:.4g}")
+            if 'hstep' in params:
+                suffix_parts.append(f"hstep{params['hstep']:.4g}")
+            if suffix_parts:
+                filename_suffix = "_" + "_".join(suffix_parts)
+        
         # Plot the data
         plot_sensor_data_c(
             data_file=data_file,
@@ -883,6 +973,7 @@ Examples:
             window_half_width=window_half_width,
             min_window_points=min_window_points,
             logger=logger,
+            filename_suffix=filename_suffix,
         )
         
         logger.info()
@@ -963,7 +1054,23 @@ Examples:
         up_file = (
             sensor_loop_dir / f"sensor_case-{case}_up/sensor.dat"
         ).resolve()
-        output_file = (sensor_loop_dir / f"sensor_case-{case}.dat").resolve()
+        
+        # Build filename with optional parameters
+        base_filename = f"sensor_case-{case}"
+        if args.include_params:
+            # Extract parameters from down-sweep directory (both should be identical)
+            p2_file = down_file.parent / "sensor.p2"
+            params = parse_p2_file(p2_file)
+            
+            suffix_parts = []
+            if args.include_mesh_h is not None:
+                suffix_parts.append(f"h{args.include_mesh_h:.4g}")
+            if 'hstep' in params:
+                suffix_parts.append(f"hstep{params['hstep']:.4g}")
+            if suffix_parts:
+                base_filename += "_" + "_".join(suffix_parts)
+        
+        output_file = (sensor_loop_dir / f"{base_filename}.dat").resolve()
 
         # Check that both sweep directions exist
         if not down_file.exists() or not up_file.exists():
@@ -989,7 +1096,27 @@ Examples:
     logger.info("-" * 80)
     plot_count = 0
     for case in cases:
-        output_file = sensor_loop_dir / f"sensor_case-{case}.dat"
+        # Build expected concatenated filename (with or without parameters)
+        base_filename = f"sensor_case-{case}"
+        if args.include_params:
+            down_dir = sensor_loop_dir / f"sensor_case-{case}_down"
+            p2_file = down_dir / "sensor.p2"
+            params = parse_p2_file(p2_file)
+            
+            suffix_parts = []
+            if args.include_mesh_h is not None:
+                suffix_parts.append(f"h{args.include_mesh_h:.4g}")
+            if 'hstep' in params:
+                suffix_parts.append(f"hstep{params['hstep']:.4g}")
+            if suffix_parts:
+                base_filename += "_" + "_".join(suffix_parts)
+                filename_suffix = "_" + "_".join(suffix_parts)
+            else:
+                filename_suffix = ""
+        else:
+            filename_suffix = ""
+        
+        output_file = sensor_loop_dir / f"{base_filename}.dat"
         if not output_file.exists():
             logger.info(f"  [SKIP] No concatenated file for case {case}")
             continue
@@ -1006,6 +1133,7 @@ Examples:
                 sensor_loop_dir,
                 xlim=plot_xlim,
                 logger=logger,
+                filename_suffix=filename_suffix,
             )
         elif case == "b":
             # 45-degree: look for coercivity
@@ -1017,6 +1145,7 @@ Examples:
                 sensor_loop_dir,
                 xlim=plot_xlim,
                 logger=logger,
+                filename_suffix=filename_suffix,
             )
         elif case == "c":
             # Hard-axis: characterize linear sensitivity region
@@ -1028,6 +1157,7 @@ Examples:
                 window_half_width=window_half_width,
                 min_window_points=min_window_points,
                 logger=logger,
+                filename_suffix=filename_suffix,
             )
         plot_count += 1
 
