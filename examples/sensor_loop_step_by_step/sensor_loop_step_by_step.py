@@ -365,10 +365,16 @@ Examples:
     )
     parser.add_argument(
         "--initial-mesh-file",
+        nargs="?",
+        const="backup_mesh_sensor.npz",
         type=str,
         metavar="FILENAME",
-        default="backup_mesh_sensor.npz",
-        help="Backup mesh file to use with initial state (default, backup_mesh_sensor.npz); will be renamed to sensor.npz",
+        default=None,
+        help=(
+            "Backup mesh file to use with initial state. If provided without a value, "
+            "defaults to backup_mesh_sensor.npz; will be renamed to sensor.npz. "
+            "The file is searched inside the sensor_initial_state directory."
+        ),
     )
 
     args = parser.parse_args()
@@ -394,7 +400,7 @@ Examples:
     # Examples of mesh sizes and resulting element counts for the eye sensor example:
     # h = 0.03 creates      nodes=24727,    tets=77791
     # h = 0.02 creates      nodes=42803,    tets=133298
-    # h = 0.015 creates     nodes=38465,    tets=118574
+    # h = 0.015 creates     nodes=38465,    tets=118574  TODO: verify this again
     # h = 0.01 creates      nodes=177289,   tets=581004
     # h = 0.01 creates      nodes=89761,    tets=292147 (meshpy backend)
     # h = 0.005 creates     nodes=1044050,  tets=4454406
@@ -580,6 +586,7 @@ Examples:
             backup_mesh_path = initial_dir / args.initial_mesh_file
             if backup_mesh_path.exists():
                 print(f"  [MESH] Found backup mesh file: {args.initial_mesh_file}")
+                print(f"  [MESH] Location searched: {backup_mesh_path}")
                 print("[STANDARDIZE] Renaming backup mesh file...")
                 standardize_mesh_file_name(initial_dir, backup_mesh_name=args.initial_mesh_file, simulation_name="sensor")
             else:
