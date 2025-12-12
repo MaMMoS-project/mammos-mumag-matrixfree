@@ -454,22 +454,23 @@ Examples:
         print("=" * 80)
         print(f"[CONFIG] New hstep absolute value: {args.hstep}")
         
-        # Find all sensor_case-*_* directories
+        # Find all sensor_case-*_* directories and include sensor_initial_state
         all_sensor_dirs = list(sensor_loop_dir.glob("sensor_case-*_*"))
+        target_dirs = [initial_dir] + all_sensor_dirs
         
         if not all_sensor_dirs:
-            print("[WARNING] No sensor_case-*_* folders found")
+            print("[WARNING] No sensor_case-*_* folders found; updating sensor_initial_state only")
         else:
-            print(f"[INFO] Found {len(all_sensor_dirs)} sensor_case-*_* folder(s)")
+            print(f"[INFO] Found {len(all_sensor_dirs)} sensor_case-*_* folder(s); also updating sensor_initial_state")
             
-            # Update hstep in all folders
-            update_hstep_in_folders(all_sensor_dirs, args.hstep)
-            
-            if args.only_hstep:
-                print("[INFO] --only-hstep specified; exiting after hstep update.")
-                return 0
-            else:
-                print("[INFO] Continuing with simulation workflow...\n")
+        # Update hstep in initial state and all case folders
+        update_hstep_in_folders(target_dirs, args.hstep)
+
+        if args.only_hstep:
+            print("[INFO] --only-hstep specified; exiting after hstep update.")
+            return 0
+        else:
+            print("[INFO] Continuing with simulation workflow...\n")
 
     # Step0.1: select coarse, fine, or custom mesh h, newly generate mesh if needed
     #   + coarse mesh: python src/mesh.py --geom eye --extent 3.5,1.0,0.01 --h 0.03 --backend meshpy --out-name eye_meshpy --verbose
