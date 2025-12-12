@@ -416,11 +416,13 @@ Examples:
     mesh_size_fine = args.mesh_size_fine  # Fine mesh element size
     # Examples of mesh sizes and resulting element counts for the eye sensor example:
     # h = 0.03 creates      nodes=24727,    tets=77791
-    # h = 0.02 creates      nodes=42803,    tets=133298
+    # h = 0.02 creates      nodes=42803,    tets=133298  TODO: verify this again
     # h = 0.015 creates     nodes=38465,    tets=118574  TODO: verify this again
-    # h = 0.01 creates      nodes=177289,   tets=581004
+    # h = 0.01 creates      nodes=177289,   tets=581004  TODO: verify this again
     # h = 0.01 creates      nodes=89761,    tets=292147 (meshpy backend)
+    # h = 0.007
     # h = 0.005 creates     nodes=1044050,  tets=4454406
+    # h = 0.002
 
     # ============================================================================
     # END OF CONFIGURATION
