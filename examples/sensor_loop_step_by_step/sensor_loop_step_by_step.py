@@ -266,7 +266,7 @@ Examples:
   python sensor_loop_step_by_step.py --load-initial-state
   
   # Load a specific initial state file by name
-  python sensor_loop_step_by_step.py --load-initial-state --initial-state-file sensor.0050.state.npz
+  python sensor_loop_step_by_step.py --initial-state-file sensor.0050.state.npz
         """,
     )
     parser.add_argument(
@@ -321,10 +321,14 @@ Examples:
         "--initial-state-file",
         type=str,
         metavar="FILENAME",
-        help="Specific initial state file to load (e.g., sensor.0050.state.npz); requires --load-initial-state",
+        help="Specific initial state file to load (e.g., sensor.0050.state.npz); automatically enables --load-initial-state",
     )
 
     args = parser.parse_args()
+
+    # If --initial-state-file is provided, automatically enable --load-initial-state
+    if args.initial_state_file:
+        args.load_initial_state = True
 
     # ============================================================================
     # USER CONFIGURATION FROM COMMAND-LINE ARGUMENTS
