@@ -772,6 +772,12 @@ Examples:
         metavar="SIZE",
         help="Optional mesh element size h to include in output filenames",
     )
+    parser.add_argument(
+        "--info",
+        type=str,
+        metavar="STRING",
+        help="Extra information string to log at the beginning of the log file",
+    )
     
     args = parser.parse_args()
 
@@ -1013,6 +1019,10 @@ Examples:
     logger.info("=" * 80)
     logger.info("SENSOR LOOP EVALUATION")
     logger.info("=" * 80)
+
+    # Log extra information if provided
+    if args.info:
+        logger.info(f"\n[INFO] {args.info}\n")
 
     # Resolve paths relative to this script to allow running from anywhere
     examples_dir = base.joinpath("examples")
