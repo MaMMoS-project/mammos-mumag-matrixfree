@@ -1179,8 +1179,8 @@ Examples:
     logger.info(
         f"[SUMMARY] Processed {concatenated_count} case(s) and generated {plot_count} plot(s)"
     )
-    logger.info("[OUTPUT] .png files saved to sensor_loop_step_by_step/")
-    logger.info("[OUTPUT] .dat files saved to sensor_loop_step_by_step/")
+    logger.info("[OUTPUT] .png files saved to sensor_loop/")
+    logger.info("[OUTPUT] .dat files saved to sensor_loop/")
     logger.info(f"[LOG] Results saved to: {log_file}")
     logger.info("=" * 80)
     
