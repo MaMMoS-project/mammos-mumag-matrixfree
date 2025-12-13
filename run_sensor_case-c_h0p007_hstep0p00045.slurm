@@ -223,6 +223,7 @@ copy_back_dir ./examples/sensor_loop/sensor_case-c_up $RESULT_BASE/sensor_case-c
 cp ./examples/sensor_loop/*.dat $RESULT_BASE/ 2>/dev/null || true
 cp ./examples/sensor_loop/*.png $RESULT_BASE/ 2>/dev/null || true
 cp ./examples/sensor_loop/*.log $RESULT_BASE/ 2>/dev/null || true
+cp ./examples/sensor_loop/*.py $RESULT_BASE/ 2>/dev/null || true
 echo "Results copied to $RESULT_BASE"
 
 # Clean up, remove working directory
