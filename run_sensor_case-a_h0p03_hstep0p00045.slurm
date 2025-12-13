@@ -222,6 +222,7 @@ copy_back_dir ./examples/sensor_loop/sensor_case-c_down $RESULT_BASE/sensor_case
 copy_back_dir ./examples/sensor_loop/sensor_case-c_up $RESULT_BASE/sensor_case-c_up
 copy_back_dir ./examples/sensor_loop/*.dat $RESULT_BASE
 copy_back_dir ./examples/sensor_loop/*.png $RESULT_BASE
+copy_back_dir ./examples/sensor_loop/*.py $RESULT_BASE
 echo "Results copied to $RESULT_BASE"
 
 # Clean up, remove working directory

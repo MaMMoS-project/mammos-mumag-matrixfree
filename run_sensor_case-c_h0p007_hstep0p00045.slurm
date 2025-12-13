@@ -46,7 +46,7 @@ MESH_H="0.007"
 # HSTEP can be choosen freely
 # HSTEP="0.00025"
 HSTEP="0.00045"
-HSTEP_INI="0.00025"
+HSTEP_INI="0.00045"
 # Choose cases to run: a, b, c or combinations like ab, ac, bc, abc
 # CASES="a b c"
 CASES="c"
@@ -222,6 +222,7 @@ copy_back_dir ./examples/sensor_loop/sensor_case-c_down $RESULT_BASE/sensor_case
 copy_back_dir ./examples/sensor_loop/sensor_case-c_up $RESULT_BASE/sensor_case-c_up
 copy_back_dir ./examples/sensor_loop/*.dat $RESULT_BASE
 copy_back_dir ./examples/sensor_loop/*.png $RESULT_BASE
+copy_back_dir ./examples/sensor_loop/*.py $RESULT_BASE
 echo "Results copied to $RESULT_BASE"
 
 # Clean up, remove working directory
