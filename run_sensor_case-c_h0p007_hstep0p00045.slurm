@@ -32,9 +32,22 @@ echo "SIMDIR:" $SIMDIR
 # SIMULATION PARAMETERS
 # ============================================================================
 # Set mesh size (h) and hstep values
+# When using backup files for the initial state, make sure they exist for the chosen parameters
+# available files are named like: 
+#   - backup_mesh_sensor_mesh_h0p005_hstep0p00025.npz
+#   - backup_mesh_sensor_mesh_h0p004_hstep0p00045.npz
+#   - backup_mesh_sensor_mesh_h0p01_hstep0p00045.npz
+# and backup_sensor_mesh_h0p005_hstep0p00025.0002.state.npz
+# ============================================================================
+# MESH_H has to match available initial state files !
 MESH_H="0.007"
+# MESH_H="0.01"
+# HSTEP can be choosen freely
+# HSTEP="0.00025"
 HSTEP="0.00045"
-CASES="c"
+# Choose cases to run: a, b, c or combinations like ab, ac, bc, abc
+CASES="a b c"
+# ============================================================================
 
 # Set variables
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
@@ -50,7 +63,6 @@ RESULT_BASE=$SLURM_SUBMIT_DIR/examples/sensor_loop/$RESULT_TAG
 # Set USE_PIXI=true to use pixi environment (recommended)
 # Set USE_PIXI=false to use the old mamba environment setup
 # ============================================================================
-
 USE_PIXI=true
 
 if [ "$USE_PIXI" = false ]; then
@@ -144,19 +156,15 @@ else
     find examples/sensor_loop/ -type f -name '*.p2' -exec grep -Hn -i -E 'h[_ ]?step' {} \;
     find examples/sensor_loop/sensor_initial_state -type f -name '*.npz' 
     $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --minimal --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP}.npz
-    # $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --minimal --hstep 0.00025 --cases b --initial-state-file backup_sensor_coarse.0002.state.npz
-    # $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --minimal --hstep 0.0005 --cases b --initial-state-file backup_sensor.0002.state.npz
-    # $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --minimal --hstep 0.001 --cases b --initial-state-file backup_sensor.0002.state.npz
-    # $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --minimal --hstep 0.001 --cases b --only-hstep
     find examples/sensor_loop/ -type f -name '*.p2' -exec grep -Hn -i -E 'h[_ ]?step' {} \;
 fi
 echo "After RUNNING SIMULATION : sensor loop step by step.py"
 
 echo "Before RUNNING EVALUATION : sensor loop evaluation.py"
 if [ "$USE_PIXI" = false ]; then
-    $MAMBA_EXE run -n $ENV_NAME python -u ./examples/sensor_loop/sensor_loop_evaluation.py --cases $CASES --include-mesh-h $MESH_H --include-params
+    $MAMBA_EXE run -n $ENV_NAME python -u ./examples/sensor_loop/sensor_loop_evaluation.py --cases $CASES --include-mesh-h $MESH_H --include-params --info "Sensor loop evaluation for SLURM job $SLURM_JOB_ID with resulttag $RESULT_TAG"
 else
-    $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_evaluation.py --cases $CASES --include-mesh-h $MESH_H --include-params
+    $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_evaluation.py --cases $CASES --include-mesh-h $MESH_H --include-params --info "Sensor loop evaluation for SLURM job $SLURM_JOB_ID with resulttag $RESULT_TAG"
 fi
 echo "After RUNNING EVALUATION : sensor loop evaluation.py"
 
