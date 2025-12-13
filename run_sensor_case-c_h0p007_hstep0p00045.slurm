@@ -41,11 +41,14 @@ echo "SIMDIR:" $SIMDIR
 # ============================================================================
 # MESH_H has to match available initial state files !
 MESH_H="0.007"
+# MESH_H="0.03"
 # MESH_H="0.01"
 # HSTEP can be choosen freely
 # HSTEP="0.00025"
 HSTEP="0.00045"
+HSTEP_INI="0.00025"
 # Choose cases to run: a, b, c or combinations like ab, ac, bc, abc
+# CASES="a b c"
 CASES="c"
 # ============================================================================
 
@@ -135,14 +138,45 @@ echo "WORKING DIR:" $PWD
 
 cp -r $SLURM_SUBMIT_DIR/src .
 mkdir -p examples/sensor_loop/
-# Copy only necessary folders: initial state and all case folders
-cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_initial_state ./examples/sensor_loop/
-cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_case-a_down ./examples/sensor_loop/
-cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_case-a_up ./examples/sensor_loop/
-cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_case-b_down ./examples/sensor_loop/
-cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_case-b_up ./examples/sensor_loop/
-cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_case-c_down ./examples/sensor_loop/
-cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_case-c_up ./examples/sensor_loop/
+cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_loop_step_by_step.py ./examples/sensor_loop/
+cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_loop_evaluation.py ./examples/sensor_loop/
+
+# Create sensor_initial_state folder and copy ONLY the required backup files + any existing sensor.* files
+mkdir -p examples/sensor_loop/sensor_initial_state
+echo "Copying backup files for initial state (h=${MESH_H}, hstep=${HSTEP_INI})..."
+cp $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_initial_state/backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.npz ./examples/sensor_loop/sensor_initial_state/ 2>/dev/null && echo "  ✓ Backup mesh copied" || echo "  ⚠ Backup mesh not found (will be generated if needed)"
+cp $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_initial_state/backup_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.0002.state.npz ./examples/sensor_loop/sensor_initial_state/ 2>/dev/null && echo "  ✓ Backup state copied" || echo "  ⚠ Backup state not found (will be computed if needed)"
+
+# Also copy any existing sensor.* files from initial state dir (config and mesh files)
+echo "Copying existing sensor.* files from initial state directory..."
+for file in $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_initial_state/sensor.*; do
+    if [ -f "$file" ]; then
+        filename=$(basename "$file")
+        # Skip old state files and .dat files (these will be regenerated)
+        if [[ ! "$filename" =~ \.state\.npz$ ]] && [[ "$filename" != "sensor.dat" ]]; then
+            cp "$file" ./examples/sensor_loop/sensor_initial_state/
+            echo "  ✓ Copied $filename"
+        fi
+    fi
+done
+
+# Copy case folders (only sensor.* files: .p2, .krn, .npz, excluding old output states and .dat)
+echo "Preparing case directories..."
+for CASE_DIR in sensor_case-a_down sensor_case-a_up sensor_case-b_down sensor_case-b_up sensor_case-c_down sensor_case-c_up; do
+    mkdir -p examples/sensor_loop/$CASE_DIR
+    # Copy all sensor.* files (configuration and mesh), but skip old output files
+    # Include: sensor.p2, sensor.krn, sensor.npz
+    # Exclude: sensor.*.state.npz (old outputs), sensor.dat (old outputs)
+    for file in $SLURM_SUBMIT_DIR/examples/sensor_loop/$CASE_DIR/sensor.*; do
+        if [ -f "$file" ]; then
+            filename=$(basename "$file")
+            # Skip state files and .dat files (these are old outputs to be regenerated)
+            if [[ ! "$filename" =~ \.state\.npz$ ]] && [[ "$filename" != "sensor.dat" ]]; then
+                cp "$file" ./examples/sensor_loop/$CASE_DIR/
+            fi
+        fi
+    done
+done
 
 # ============================================================================
 # RUN SIMULATIONS
@@ -151,11 +185,11 @@ cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_case-c_up ./examples/sensor_
 echo "Before RUNNING SIMULATION : sensor loop step by step.py"
 echo "SIMULATION PARAMETERS: MESH_H=$MESH_H, HSTEP=$HSTEP, CASES=$CASES"
 if [ "$USE_PIXI" = false ]; then
-    $MAMBA_EXE run -n $ENV_NAME python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --minimal --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP}.npz
+    $MAMBA_EXE run -n $ENV_NAME python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.npz
 else
     find examples/sensor_loop/ -type f -name '*.p2' -exec grep -Hn -i -E 'h[_ ]?step' {} \;
     find examples/sensor_loop/sensor_initial_state -type f -name '*.npz' 
-    $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --minimal --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP}.npz
+    $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.npz
     find examples/sensor_loop/ -type f -name '*.p2' -exec grep -Hn -i -E 'h[_ ]?step' {} \;
 fi
 echo "After RUNNING SIMULATION : sensor loop step by step.py"
