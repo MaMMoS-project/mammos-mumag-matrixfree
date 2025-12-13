@@ -155,11 +155,11 @@ cp -r $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_case-c_up ./examples/sensor_
 echo "Before RUNNING SIMULATION : sensor loop step by step.py"
 echo "SIMULATION PARAMETERS: MESH_H=$MESH_H, HSTEP=$HSTEP, CASES=$CASES"
 if [ "$USE_PIXI" = false ]; then
-    $MAMBA_EXE run -n $ENV_NAME python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --minimal --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP}.npz
+    $MAMBA_EXE run -n $ENV_NAME python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP}.npz
 else
     find examples/sensor_loop/ -type f -name '*.p2' -exec grep -Hn -i -E 'h[_ ]?step' {} \;
     find examples/sensor_loop/sensor_initial_state -type f -name '*.npz' 
-    $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --minimal --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP}.npz
+    $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP}.npz
     find examples/sensor_loop/ -type f -name '*.p2' -exec grep -Hn -i -E 'h[_ ]?step' {} \;
 fi
 echo "After RUNNING SIMULATION : sensor loop step by step.py"
