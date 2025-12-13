@@ -444,7 +444,7 @@ Examples:
     print(f"  Base directory:        {base}")
     examples_dir = base.joinpath("examples")
     print(f"  Examples directory:    {examples_dir}")
-    sensor_loop_dir = examples_dir.joinpath("sensor_loop_step_by_step")
+    sensor_loop_dir = examples_dir.joinpath("sensor_loop")
     print(f"  Sensor loop directory: {sensor_loop_dir}")
     initial_dir = sensor_loop_dir.joinpath("sensor_initial_state")
     print(f"  Initial state dir:     {initial_dir}")
