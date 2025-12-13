@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# To run this script, navigate to the "/examples/sensor_loop_step_by_step" subfolder and
+# To run this script, navigate to the "/examples/sensor_loop" subfolder and
 # execute: python sensor_loop_step_by_step.py
 
 

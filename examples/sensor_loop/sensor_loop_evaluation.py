@@ -1026,7 +1026,7 @@ Examples:
 
     # Resolve paths relative to this script to allow running from anywhere
     examples_dir = base.joinpath("examples")
-    sensor_loop_dir = examples_dir.joinpath("sensor_loop_step_by_step")
+    sensor_loop_dir = examples_dir.joinpath("sensor_loop")
 
     logger.info("[PATH INFO]")
     logger.info(f"  Base directory:        {base}")
