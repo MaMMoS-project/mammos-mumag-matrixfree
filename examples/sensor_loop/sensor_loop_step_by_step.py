@@ -75,15 +75,15 @@ def standardize_state_file_names(directory: Path, backup_name: str, simulation_n
         step_number = match.group(2)
         expected_name = f"{simulation_name}.{step_number}.state.npz"
         
-        # Only rename if prefix doesn't match the simulation name
+        # Only copy if prefix doesn't match the simulation name
         if current_prefix != simulation_name:
             new_path = directory / expected_name
-            state_file.rename(new_path)
-            print(f"  [RENAME] {state_file.name} → {expected_name}")
+            shutil.copy(state_file, new_path)
+            print(f"  [COPY] {state_file.name} → {expected_name} (original preserved)")
             renamed_count += 1
     
     if renamed_count > 0:
-        print(f"[RENAME] ✓ Standardized {renamed_count} state file(s) to '{simulation_name}' prefix")
+        print(f"[COPY] ✓ Standardized {renamed_count} state file(s) to '{simulation_name}' prefix (originals preserved)")
 
 
 def standardize_mesh_file_name(directory: Path, backup_mesh_name: str = None, simulation_name: str = "sensor") -> None:
@@ -111,9 +111,9 @@ def standardize_mesh_file_name(directory: Path, backup_mesh_name: str = None, si
             # Remove existing mesh if present
             if new_path.exists():
                 new_path.unlink()
-            backup_mesh_path.rename(new_path)
-            print(f"  [RENAME] {backup_mesh_name} → {expected_name}")
-            print(f"[RENAME] ✓ Standardized mesh file to '{simulation_name}.npz'")
+            shutil.copy(backup_mesh_path, new_path)
+            print(f"  [COPY] {backup_mesh_name} → {expected_name} (original preserved)")
+            print(f"[COPY] ✓ Standardized mesh file to '{simulation_name}.npz' (original preserved)")
 
 
 def find_last_state_file(directory: Path) -> str:
