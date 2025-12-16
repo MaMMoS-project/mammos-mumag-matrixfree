@@ -122,6 +122,25 @@ else
     fi
     echo "ENVIRONMENT: Using Pixi with manifest at $SLURM_SUBMIT_DIR/pixi.toml"
     echo "PIXI EXECUTABLE: $PIXI_EXE"
+
+    # ---------- Pixi environment activation & diagnostics ----------
+    # Derive the pixi environment root from the active python inside pixi
+    PIXI_ENV_ROOT=$("$PIXI_EXE" run --manifest-path "$SLURM_SUBMIT_DIR/pixi.toml" python -c 'import sys; print(sys.prefix)')
+    # Prepend its bin to PATH for any direct tool calls in this script
+    export PATH="$PIXI_ENV_ROOT/bin:$PATH"
+    # Ensure no hidden Neper defaults are injected
+    unset NEPEROPT
+
+    echo "PIXI ENV ROOT: $PIXI_ENV_ROOT"
+    echo "PATH: $PATH"
+    # Confirm gmsh/neper are available from the pixi environment
+    echo "DIAGNOSTICS:"
+    "$PIXI_EXE" run --manifest-path "$SLURM_SUBMIT_DIR/pixi.toml" which gmsh || true
+    "$PIXI_EXE" run --manifest-path "$SLURM_SUBMIT_DIR/pixi.toml" gmsh -version || true
+    "$PIXI_EXE" run --manifest-path "$SLURM_SUBMIT_DIR/pixi.toml" which neper || true
+    # If Neper path detection fails, you can force gmsh via NEPEROPT (uncomment the next two lines)
+    # GMSH_BIN=$("$PIXI_EXE" run --manifest-path "$SLURM_SUBMIT_DIR/pixi.toml" which gmsh)
+    # export NEPEROPT="-gmsh $GMSH_BIN"
 fi
 
 # Create working directory
