@@ -14,6 +14,7 @@ dependencies:
   - meshpy
   - neper
   - povray
+  - gmsh
   - pip
   - pip:
       - jax
