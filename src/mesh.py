@@ -1365,8 +1365,17 @@ def mesh_backend_neper_poly(n: int, seed: int, size_x: float, size_y: float, siz
     cmd_vis = ["neper", "-V", f"n{n}-id{seed}.tess", "-datacellcol", "id", "-print", f"n{n}-id{seed}"]
     subprocess.run(cmd_vis, check=True)
 
-    # 2) Mesh tessellation
+    # 2) Mesh tessellation (ensure gmsh path is provided if available)
     cmd_mesh = ["neper", "-M", f"n{n}-id{seed}.tess", "-cl", f"{h}", "-format", "vtk"]
+    gmsh_path = find_gmsh_path()
+    if gmsh_path:
+        cmd_mesh.extend(["-gmsh", gmsh_path])
+    else:
+        print(
+            "[warn] gmsh executable not found on PATH; Neper will try default. "
+            "If meshing fails, install gmsh or specify its path.",
+            file=sys.stderr,
+        )
     subprocess.run(cmd_mesh, check=True)
 
     # 3) Load VTK and propagate grain IDs
