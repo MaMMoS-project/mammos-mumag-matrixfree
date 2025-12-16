@@ -1342,13 +1342,12 @@ def run_single_solid_mesher(
 
 
 
-def find_gmsh_path() -> str | None:
+def find_gmsh_path() -> bool:
     """
-    Attempt to locate the gmsh executable.
+    Check if gmsh executable is available on PATH.
+    Returns True if found, False otherwise.
     """
-    gmsh = shutil.which("gmsh")
-    if gmsh:
-        return gmsh
+    return shutil.which("gmsh") is not None
 
 
 def mesh_backend_neper_poly(n: int, seed: int, size_x: float, size_y: float, size_z: float, h: float):
@@ -1365,15 +1364,17 @@ def mesh_backend_neper_poly(n: int, seed: int, size_x: float, size_y: float, siz
     cmd_vis = ["neper", "-V", f"n{n}-id{seed}.tess", "-datacellcol", "id", "-print", f"n{n}-id{seed}"]
     subprocess.run(cmd_vis, check=True)
 
-    # 2) Mesh tessellation (ensure gmsh path is provided if available)
+    # 2) Mesh tessellation (gmsh must be on PATH; Neper uses it directly by name)
     cmd_mesh = ["neper", "-M", f"n{n}-id{seed}.tess", "-cl", f"{h}", "-format", "vtk"]
-    gmsh_path = find_gmsh_path()
-    if gmsh_path:
-        cmd_mesh.extend(["-gmsh", gmsh_path])
+    gmsh_available = find_gmsh_path()
+    if gmsh_available:
+        # Pass just the command name "gmsh", not the full path
+        # Neper will find it on PATH just like we did
+        cmd_mesh.extend(["-gmsh", "gmsh"])
     else:
         print(
-            "[warn] gmsh executable not found on PATH; Neper will try default. "
-            "If meshing fails, install gmsh or specify its path.",
+            "[warn] gmsh executable not found on PATH; Neper meshing may fail. "
+            "Install gmsh or ensure it is available on your PATH.",
             file=sys.stderr,
         )
     subprocess.run(cmd_mesh, check=True)
