@@ -40,9 +40,9 @@ echo "SIMDIR:" $SIMDIR
 # and backup_sensor_mesh_h0p005_hstep0p00025.0002.state.npz
 # ============================================================================
 # MESH_H has to match available initial state files !
-MESH_H="0.01"
+MESH_H="0.003"
 # HSTEP can be chosen freely
-HSTEP="0.0045"
+HSTEP="0.0025"
 # ============================================================================
 
 # Set variables
