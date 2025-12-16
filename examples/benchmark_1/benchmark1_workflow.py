@@ -1,41 +1,739 @@
 """
-Benchmark 1 workflow (draft/runbook)
+Benchmark 1 Workflow - Polycrystal Micromagnetic Hysteresis Loop Simulation
 
-Step 1 — Generate mesh
-	Purpose: Create a polycrystal mesh via Neper with fixed grain count and extents.
-	Command: python ../../src/mesh.py --geom poly --n 8 --id 123 --extent 80,80,80
-	Output : isotrop.npz
+This script automates the complete benchmark 1 workflow for micromagnetic simulations
+of polycrystalline materials using Neper mesh generation and JAX-based computations.
 
-Step 2 — Build krn for isotropic material
-	Purpose: Create isotropic krn from the mesh; K1 = 700 kJ/m^3, Js = 0.8 T (defaults).
-	Command: python ../../src/make_krn.py --tol 0.05 --mesh --out isotrop.krn
+Workflow Overview:
+==================
+Step 1: Generate polycrystal mesh via Neper (4 grains, configurable extent)
+Step 2: Build KRN file for isotropic material (K1=700 kJ/m³, Js=0.8 T)
+Step 3: Run micromagnetic hysteresis loop simulation
+Step 4: Repeat Steps 1-3 multiple times and compute averaged hysteresis loop
 
-Step 3 — Run micromagnetic loop
-	Purpose: Simulate loop with hstep=0.001 T, hstart=2 T, hfinal=-2 T.
-	.p2 contents:
-		[mesh]
-		size = 1.0e-9
+Usage:
+======
+# Single run with full extent (80x80x80 μm³)
+python benchmark1_workflow.py
 
-		[initial state]
-		mx = 0.
-		My = 0.
-		mz = 1.
+# Single run with minimal extent (20x20x20 μm³) for faster testing
+python benchmark1_workflow.py --minimal
 
-		[field]
-		hstart = 2.
-		hfinal = -2.
-		hstep = 0.01
-		hx = 0.
-		hy = 0.
-		hz = 1.
-		mstep = 0.4
-		mfinal = -2.0
+# Multiple runs with averaging (recommended for benchmarking)
+python benchmark1_workflow.py --repeats 10
+python benchmark1_workflow.py --minimal --repeats 3
 
-		[minimizer]
-		tol_fun = 1e-10
-		tol_hmag_factor = 1
-	Command: python ../../src/loop.py --mesh isotrop.npz
-
-Step 4 — Repeat and average
-	Purpose: Repeat Steps 1–3 ten times; compute the average hysteresis loop across runs.
+Configuration:
+==============
+The workflow requires an isotrop.p2 file with hysteresis loop parameters:
+- Mesh size: 1.0e-9 μm
+- Initial state: mz=1 (saturated along z-axis)
+- Field sweep: 2.0 T → -2.0 T, step 0.01 T, direction: Hz
+- Minimizer: tol_fun=1e-10, tol_hmag_factor=1
 """
+import argparse
+import subprocess
+import shutil
+import sys
+from pathlib import Path
+from typing import List, Optional
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+# =============================================================================
+# STEP 1: MESH GENERATION
+# =============================================================================
+
+def step1_generate_mesh(
+    base: Path,
+    benchmark_dir: Path,
+    neper_minimal: int = 1,
+    grains_override: Optional[int] = None,
+    extent_override: Optional[str] = None,
+) -> None:
+    """Generate polycrystal mesh using Neper.
+    
+    Creates a polycrystalline mesh using Neper with:
+    - Grain count: default 8 grains (override with grains_override)
+    - Minimal extent: 20x20x20 μm³ (for testing, faster)
+    - Full extent: 80x80x80 μm³ (for production benchmarks)
+    - Override: custom extent if extent_override is provided (e.g., "40,40,40")
+    
+    Output: isotrop_down/isotrop.npz (mesh file)
+    
+    Args:
+        base: Base directory of the project (contains src/)
+        benchmark_dir: Benchmark directory (examples/benchmark_1/)
+        neper_minimal: 1 for minimal extent (20³), 0 for full extent (80³)
+        grains_override: Optional integer to set custom grain count (default 8)
+        extent_override: Optional custom extent string "Lx,Ly,Lz" (takes precedence)
+    """
+    print("\n" + "=" * 80)
+    print("BENCHMARK 1 WORKFLOW - STEP 1: MESH GENERATION")
+    print("=" * 80)
+    
+    try:
+        # Choose extent based on neper_minimal flag
+        grains = grains_override if grains_override is not None else 8
+
+        if extent_override:
+            extent = extent_override
+            print(f"\n[CONFIG] extent_override provided -> {extent}")
+        else:
+            extent = "20,20,20" if neper_minimal else "80,80,80"
+            print(f"\n[CONFIG] NEPER_MINIMAL = {neper_minimal}")
+        print(f"[CONFIG] Mesh extent: {extent}")
+        print(f"[CONFIG] Grain count: {grains}")
+        
+        mesh_script = (base / "src/mesh.py").resolve()
+        mesh_cmd = [
+            sys.executable, str(mesh_script),
+            "--geom", "poly",
+            "--n", str(grains),
+            "--id", "123",
+            "--extent", extent
+        ]
+        
+        print(f"\n[COMMAND] {' '.join(mesh_cmd)}")
+        print("[SIMULATION] Generating polycrystal mesh with Neper...")
+        subprocess.run(mesh_cmd, check=True, cwd=str(benchmark_dir))
+        
+        # Move output file
+        src_file = benchmark_dir / "single_solid.npz"
+        dst_dir = benchmark_dir / "isotrop_down"
+        dst_file = dst_dir / "isotrop.npz"
+        
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src_file), str(dst_file))
+        
+        print(f"\n[RESULT] ✓ Mesh generation complete")
+        print(f"[OUTPUT] {dst_file}")
+    except subprocess.CalledProcessError as e:
+        print(f"\n[ERROR] ✗ Mesh generation failed: {e}", file=sys.stderr)
+        raise
+    except FileNotFoundError as e:
+        print(f"\n[ERROR] ✗ File operation failed: {e}", file=sys.stderr)
+        raise
+
+
+# =============================================================================
+# STEP 2: BUILD KRN FILE
+# =============================================================================
+
+def step2_build_krn(base: Path, benchmark_dir: Path, tol: float = 0.01) -> None:
+    """Build KRN file for isotropic material.
+    
+    Creates a kernel file with material parameters:
+    - Anisotropy constant K1: 700 kJ/m³
+    - Saturation polarization Js: 0.8 T
+    - Numerical tolerance: tol (default 0.01)
+    
+    Input: isotrop_down/isotrop.npz (mesh)
+    Output: isotrop_down/isotrop.krn (material kernel)
+    
+    Args:
+        base: Base directory of the project (contains src/)
+        benchmark_dir: Benchmark directory (examples/benchmark_1/)
+        tol: Numerical tolerance forwarded to make_krn.py (default 0.01)
+    """
+    print("\n" + "=" * 80)
+    print("BENCHMARK 1 WORKFLOW - STEP 2: BUILD KRN FOR ISOTROPIC MATERIAL")
+    print("=" * 80)
+    
+    try:
+        mesh_path = (benchmark_dir / "isotrop_down" / "isotrop.npz").resolve()
+        krn_path = (benchmark_dir / "isotrop_down" / "isotrop.krn").resolve()
+        
+        if not mesh_path.exists():
+            raise FileNotFoundError(f"Mesh file not found: {mesh_path}")
+        
+        print(f"\n[CONFIG] Material: Isotropic (K1 = 700 kJ/m³, Js = 0.8 T)")
+        print(f"[CONFIG] Tolerance: {tol}")
+        
+        make_krn_script = (base / "src/make_krn.py").resolve()
+        krn_cmd = [
+            sys.executable, str(make_krn_script),
+            "--tol", str(tol),
+            "--K1", "700000",
+            "--Js", "0.8",
+            "--mesh", str(mesh_path),
+            "--out", str(krn_path)
+        ]
+        
+        print(f"\n[COMMAND] {' '.join(krn_cmd)}")
+        print("[SIMULATION] Building krn file for isotropic material...")
+        subprocess.run(krn_cmd, check=True)
+        
+        print(f"\n[RESULT] ✓ KRN file generation complete")
+        print(f"[OUTPUT] {krn_path}")
+    except subprocess.CalledProcessError as e:
+        print(f"\n[ERROR] ✗ KRN generation failed: {e}", file=sys.stderr)
+        raise
+    except FileNotFoundError as e:
+        print(f"\n[ERROR] ✗ File operation failed: {e}", file=sys.stderr)
+        raise
+
+
+# =============================================================================
+# STEP 3: RUN HYSTERESIS LOOP
+# =============================================================================
+
+def step3_run_loop(base: Path, benchmark_dir: Path, num_loops: int = 1) -> None:
+    """Run micromagnetic hysteresis loop simulation.
+    
+    Simulates a magnetic field sweep using parameters from isotrop.p2:
+    - Field range: 2.0 T → -2.0 T
+    - Field step: 0.01 T
+    - Field direction: Hz (z-axis)
+    - Initial state: mz=1 (saturated)
+    
+    Input: isotrop_down/isotrop.npz (mesh), isotrop_down/isotrop.krn (material), isotrop_down/isotrop.p2 (parameters)
+    Output: isotrop_down/isotrop.dat (hysteresis data), isotrop_down/*.state.npz (magnetization states)
+    
+    Args:
+        base: Base directory of the project (contains src/)
+        benchmark_dir: Benchmark directory (examples/benchmark_1/)
+        num_loops: Number of times to run loop.py (default: 1)
+    """
+    print("\n" + "=" * 80)
+    print("BENCHMARK 1 WORKFLOW - STEP 3: RUN MICROMAGNETIC LOOP")
+    print("=" * 80)
+    
+    try:
+        isotrop_dir = benchmark_dir / "isotrop_down"
+        mesh_path = (isotrop_dir / "isotrop").resolve()
+        p2_file = isotrop_dir / "isotrop.p2"
+        
+        # Check if p2 file exists
+        if not p2_file.exists():
+            print(f"\n[ERROR] ✗ Configuration file not found: {p2_file}", file=sys.stderr)
+            print(f"[ERROR] Please create the isotrop.p2 file with hysteresis loop parameters.", file=sys.stderr)
+            raise FileNotFoundError(f"Configuration file required: {p2_file}")
+        
+        print(f"\n[CONFIG] Hysteresis loop parameters:")
+        print(f"  Field: hstart = 2.0 T, hfinal = -2.0 T, hstep = 0.01 T")
+        print(f"  Initial state: mx = 0, my = 0, mz = 1")
+        print(f"  Direction: Hz (along z-axis)")
+        print(f"  Number of runs: {num_loops}")
+        
+        loop_script = (base / "src/loop.py").resolve()
+        
+        for loop_idx in range(1, num_loops + 1):
+            if num_loops > 1:
+                print(f"\n[LOOP] Run {loop_idx}/{num_loops}")
+            
+            loop_cmd = [
+                sys.executable, str(loop_script),
+                "--mesh", str(mesh_path)
+            ]
+            
+            print(f"\n[COMMAND] {' '.join(loop_cmd)}")
+            print("[SIMULATION] Running micromagnetic hysteresis loop...")
+            subprocess.run(loop_cmd, check=True, cwd=str(isotrop_dir))
+        
+        print(f"\n[RESULT] ✓ Loop simulation complete ({num_loops} run{'s' if num_loops > 1 else ''})")
+        print(f"[OUTPUT] Results saved in {isotrop_dir}/")
+    except subprocess.CalledProcessError as e:
+        print(f"\n[ERROR] ✗ Loop simulation failed: {e}", file=sys.stderr)
+        raise
+    except FileNotFoundError as e:
+        print(f"\n[ERROR] ✗ {e}", file=sys.stderr)
+        raise
+
+
+# =============================================================================
+# PLOTTING UTILITIES
+# =============================================================================
+
+def plot_hysteresis_loop(data_file: Path, output_file: Path, overlay_files: Optional[List[Path]] = None) -> None:
+    """Plot hysteresis loop from .dat file.
+    
+    Creates a publication-quality plot showing applied field vs. magnetization.
+    Converts data from Tesla to kA/m for both axes.
+    Optionally overlays individual run curves behind the averaged curve.
+    
+    Input: .dat file with columns [vtu_idx, mu0*Hext(T), J·h(T), ...]
+    Output: PNG plot at 300 dpi
+    
+    Args:
+        data_file: Path to .dat file containing hysteresis loop data (average)
+        output_file: Path where PNG will be saved
+        overlay_files: Optional list of .dat files to plot behind the average (alpha=0.5)
+    """
+    try:
+        # Load data, skipping header line
+        data = np.loadtxt(data_file, skiprows=1)
+        
+        # Physical constants
+        mu0 = 4 * np.pi * 1e-7  # Permeability of free space [T·m/A]
+        
+        # Extract columns: [1]=mu0*Hext(T), [2]=J.h(T)
+        Hext_T = data[:, 1]  # External field [T]
+        J_h_T = data[:, 2]  # Magnetization response [T]
+        
+        # Convert to physical units
+        Hext_kA_per_m = Hext_T / mu0 / 1e3  # External field [kA/m]
+        M_kA_per_m = J_h_T / mu0 / 1e3  # Magnetization [kA/m]
+        
+        # Create plot with secondary axes (bottom: Tesla, top: kA/m)
+        fig, ax_left = plt.subplots(figsize=(10, 6))
+
+        # Optional overlays (individual runs) plotted behind average
+        if overlay_files:
+            for ofile in overlay_files:
+                try:
+                    odata = np.loadtxt(ofile, skiprows=1)
+                    oHext_T = odata[:, 1]
+                    oJ_h_T = odata[:, 2]
+                    oM_kA_per_m = oJ_h_T / mu0 / 1e3
+                    ax_left.plot(
+                        oHext_T,
+                        oM_kA_per_m,
+                        color="gray",
+                        alpha=0.5,
+                        linewidth=1.0,
+                        label=None,
+                    )
+                except Exception as overlay_err:
+                    print(f"[WARNING] Could not overlay {ofile}: {overlay_err}", file=sys.stderr)
+
+        # Primary axes: bottom in Tesla for averaged curve
+        ax_left.plot(Hext_T, M_kA_per_m, "C0-", linewidth=1.5, label="Hysteresis loop")
+        ax_left.plot(Hext_T, M_kA_per_m, "C0+", markersize=4, alpha=0.6, label="Data points")
+        ax_left.set_xlabel("Applied Field µ0 Hext (T)", fontsize=11)
+        ax_left.set_ylabel("Magnetization M (kA/m)", fontsize=11)
+        ax_left.grid(True, alpha=0.3)
+
+        # Secondary y-axis: J in Tesla
+        ax_right = ax_left.twinx()
+        ax_right.set_ylabel("Magnetization J (T)", fontsize=11)
+        ax_right.set_ylim(ax_left.get_ylim())
+        # Map kA/m ticks back to Tesla using mu0
+        left_ticks = ax_left.get_yticks()
+        ax_right.set_yticks(left_ticks)
+        ax_right.set_yticklabels([f"{tick * mu0 * 1e3:.2f}" for tick in left_ticks])
+
+        # Secondary x-axis: Hext in kA/m (converted from bottom Tesla)
+        ax_top = ax_left.twiny()
+        ax_top.set_xlabel("Applied Field Hext (kA/m)", fontsize=11)
+        top_ticks = ax_left.get_xticks()
+        ax_top.set_xticks(top_ticks)
+        ax_top.set_xlim(ax_left.get_xlim())
+        # Round top-axis ticks to whole numbers (kA/m) with no decimal part
+        ax_top.set_xticklabels([f"{tick / mu0 / 1e3:.0f}" for tick in top_ticks])
+
+        ax_left.set_title("Averaged Hysteresis Loop", fontsize=12, fontweight="bold")
+        ax_left.legend(loc="best", fontsize=10)
+        fig.tight_layout()
+        
+        # Save plot
+        plt.savefig(output_file.resolve(), dpi=300)
+        plt.close()
+        
+        print(f"[PLOT] Saved hysteresis loop plot to: {output_file.name}")
+    except Exception as e:
+        print(f"[ERROR] ✗ Failed to plot hysteresis loop: {e}", file=sys.stderr)
+        raise
+
+
+# =============================================================================
+# STEP 4: REPEAT AND AVERAGE
+# =============================================================================
+
+def step4_repeat_and_average(
+    base: Path,
+    benchmark_dir: Path,
+    neper_minimal: int = 1,
+    num_repeats: int = 1,
+    grains_override: Optional[int] = None,
+    extent_override: Optional[str] = None,
+    tol: float = 0.01,
+    average_only: bool = False,
+) -> None:
+    """Repeat Steps 1-3 multiple times and compute averaged hysteresis loop.
+    
+    This function orchestrates the complete benchmark workflow:
+    
+    STEP A: Iteration and File Storage
+    -----------------------------------
+    - Runs Steps 1-3 for num_repeats iterations
+    - Each iteration uses a fresh mesh (new Neper realization)
+    - Stores results as: results/isotrop_run01.dat, isotrop_run02.dat, ...
+    
+    STEP B: Statistical Averaging
+    ------------------------------
+    - Discovers all isotrop_run*.dat files in results/ directory
+    - Validates run index consistency
+    - Computes element-wise mean across all runs (numpy.mean along axis 0)
+    - Writes averaged data to: results/isotrop_average.dat
+    - Generates plot: results/isotrop_average.png
+    
+    For single runs (num_repeats=1):
+    - Still creates isotrop_average.dat (copy of single run)
+    - Still generates plot for consistency
+    - Useful for maintaining uniform output structure
+    
+    Args:
+        base: Base directory of the project (contains src/)
+        benchmark_dir: Benchmark directory (examples/benchmark_1/)
+        neper_minimal: 1 for minimal extent (20³), 0 for full extent (80³)
+        num_repeats: Number of workflow iterations (default: 1)
+        grains_override: Optional integer to set custom grain count (default 8)
+        extent_override: Optional custom extent string "Lx,Ly,Lz" (takes precedence)
+        tol: Numerical tolerance forwarded to make_krn.py (default 0.01)
+        average_only: If True, skip Steps 1-3 and only perform averaging/plotting
+    """
+    print("\n" + "=" * 80)
+    if num_repeats > 1:
+        print("BENCHMARK 1 WORKFLOW - STEP 4: REPEAT AND AVERAGE")
+    else:
+        print("BENCHMARK 1 WORKFLOW - STEPS 1-3: SINGLE RUN")
+    print("=" * 80)
+    
+    print(f"\n[CONFIG] Number of repeats: {num_repeats}")
+    print(f"[CONFIG] Average only:     {average_only}")
+    if num_repeats > 1 and not average_only:
+        print(f"[CONFIG] This will run Steps 1-3 a total of {num_repeats} times")
+    
+    try:
+        results_dir = benchmark_dir / "results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        
+        # ===== STEP A: FILE STORAGE =====
+        if not average_only:
+            if num_repeats > 1:
+                print("\n" + "=" * 80)
+                print("STEP A: FILE STORAGE - Running iterations and storing results")
+                print("=" * 80)
+            
+            loop_data_files = []
+            
+            for run_idx in range(1, num_repeats + 1):
+                if num_repeats > 1:
+                    print("\n" + "-" * 80)
+                    print(f"RUN {run_idx}/{num_repeats}")
+                    print("-" * 80)
+                
+                # Clean up previous isotrop outputs for this run
+                isotrop_dir = benchmark_dir / "isotrop_down"
+                for file in isotrop_dir.glob("isotrop.dat"):
+                    file.unlink()
+                for file in isotrop_dir.glob("isotrop.*.state.npz"):
+                    file.unlink()
+                
+                # Run steps 1-3
+                step1_generate_mesh(base, benchmark_dir, neper_minimal, grains_override, extent_override)
+                step2_build_krn(base, benchmark_dir, tol)
+                step3_run_loop(base, benchmark_dir)
+                
+                # Copy results to results directory
+                isotrop_dat = isotrop_dir / "isotrop.dat"
+                if isotrop_dat.exists():
+                    run_result_file = results_dir / f"isotrop_run{run_idx:02d}.dat"
+                    shutil.copy(isotrop_dat, run_result_file)
+                    loop_data_files.append(run_result_file)
+                    if num_repeats > 1:
+                        print(f"[RESULT] ✓ Saved run {run_idx}: {run_result_file.name}")
+                else:
+                    print(f"[WARNING] ⚠ Run {run_idx}: No isotrop.dat file found", file=sys.stderr)
+        else:
+            print("\n" + "=" * 80)
+            print("STEP A: FILE STORAGE - Skipped (average-only mode)")
+            print("=" * 80)
+        
+        # ===== STEP B: AVERAGING =====
+        print("\n" + "=" * 80)
+        print("STEP B: AVERAGING - Computing statistical averages")
+        print("=" * 80)
+        
+        if num_repeats == 1 and not average_only:
+            print(f"\n[INFO] Single run: averaging trivial (1 file), but will create average file and plot for consistency")
+        if average_only:
+            print(f"\n[INFO] Average-only mode: using existing isotrop_run*.dat files in results/")
+        
+        # Discover all .dat files in results directory
+        dat_files = sorted(results_dir.glob("isotrop_run*.dat"))
+        
+        if not dat_files:
+            print("[WARNING] No hysteresis loop data files found for averaging")
+            print(f"\n[RESULT] ✓ Repeat workflow complete (no averaging performed)")
+            print(f"[OUTPUT] Results directory: {results_dir}/")
+            return
+        
+        print(f"\n[B.1] DISCOVERY")
+        print(f"  Found {len(dat_files)} .dat files in {results_dir}/")
+        for f in dat_files:
+            print(f"    • {f.name}")
+        
+        # Validate run indices consistency
+        print(f"\n[B.2] VALIDATION")
+        run_indices = []
+        for dat_file in dat_files:
+            # Extract run index from filename: isotrop_run{idx:02d}.dat
+            idx_str = dat_file.stem.replace("isotrop_run", "")
+            try:
+                run_idx = int(idx_str)
+                run_indices.append(run_idx)
+            except ValueError:
+                print(f"  [WARNING] ⚠ Could not parse index from {dat_file.name}", file=sys.stderr)
+        
+        # Check consistency: indices should be 1, 2, 3, ..., N
+        expected_indices = list(range(1, len(dat_files) + 1))
+        run_indices_sorted = sorted(run_indices)
+        
+        if run_indices_sorted == expected_indices:
+            print(f"  ✓ Run indices are consistent: {run_indices_sorted}")
+        else:
+            print(f"  [WARNING] ⚠ Run indices are NOT consistent!", file=sys.stderr)
+            print(f"    Expected: {expected_indices}", file=sys.stderr)
+            print(f"    Found:    {run_indices_sorted}", file=sys.stderr)
+            print(f"    Proceeding with available files...", file=sys.stderr)
+        
+        # Load all data files and compute average
+        print(f"\n[B.3] DATA LOADING AND AVERAGING")
+        print(f"  Loading data from {len(dat_files)} files...")
+        
+        all_data = []
+        header_line = None
+        
+        for dat_file in dat_files:
+            # Read header (first line starting with #)
+            with open(dat_file, 'r') as f:
+                header_line = f.readline().strip()
+            
+            # Load numeric data, skipping the header line
+            data = np.loadtxt(dat_file, skiprows=1)
+            all_data.append(data)
+            print(f"    ✓ Loaded {dat_file.name}: shape {data.shape}")
+        
+        # Ensure all arrays have the same shape
+        if len(all_data) > 1:
+            shapes = [d.shape for d in all_data]
+            if not all(s == shapes[0] for s in shapes):
+                print(f"  [WARNING] ⚠ Data files have different shapes!", file=sys.stderr)
+                print(f"    Shapes: {shapes}", file=sys.stderr)
+                print(f"    This may indicate inconsistent simulation results.", file=sys.stderr)
+        
+        # Stack all data and compute mean
+        data_stack = np.stack(all_data, axis=0)  # Shape: (num_runs, num_rows, num_cols)
+        data_average = np.mean(data_stack, axis=0)  # Average over runs: (num_rows, num_cols)
+        
+        print(f"\n  ✓ Data averaging completed")
+        print(f"    Input shape:  {data_stack.shape} (num_runs={data_stack.shape[0]}, "
+              f"num_rows={data_stack.shape[1]}, num_cols={data_stack.shape[2]})")
+        print(f"    Output shape: {data_average.shape} (num_rows, num_cols)")
+        print(f"    Averaging method: Element-wise mean (numpy.mean along axis 0)")
+        
+        # Write averaged data to file
+        avg_file = results_dir / "isotrop_average.dat"
+        print(f"\n[B.4] WRITING RESULTS")
+        print(f"  Saving averaged data to: {avg_file}")
+        
+        with open(avg_file, 'w') as f:
+            # Write header
+            f.write(header_line + "\n")
+            # Write averaged data with appropriate formatting
+            np.savetxt(f, data_average, fmt='%3d' if data_average.dtype == int else '%e', 
+                      delimiter='  ')
+        
+        print(f"  ✓ Successfully wrote {avg_file.name}")
+        print(f"    File size: {avg_file.stat().st_size / 1024:.2f} KB")
+        
+        # Generate plot for averaged data
+        print(f"\n[B.5] GENERATING PLOT")
+        plot_file = results_dir / "isotrop_average.png"
+        plot_hysteresis_loop(avg_file, plot_file, overlay_files=dat_files)
+        
+        # Summary
+        print("\n" + "=" * 80)
+        print("STEP 4 SUMMARY")
+        print("=" * 80)
+        if average_only:
+            print(f"[STEP A] Found {len(dat_files)} existing run files in results/ directory")
+        else:
+            print(f"[STEP A] Stored {len(dat_files)} individual run files in results/ directory")
+        print(f"[STEP B] Averaged {len(dat_files)} runs to create isotrop_average.dat")
+        print(f"\n[OUTPUT]")
+        print(f"  Individual runs: {results_dir}/isotrop_run01.dat ... isotrop_run{len(dat_files):02d}.dat")
+        print(f"  Average result:  {avg_file}")
+        
+        print(f"\n[RESULT] ✓ Repeat and average workflow complete")
+        print(f"[OUTPUT] Results directory: {results_dir}/")
+        
+    except Exception as e:
+        print(f"\n[ERROR] ✗ Repeat and average workflow failed: {e}", file=sys.stderr)
+        raise
+
+
+# =============================================================================
+# MAIN ENTRY POINT
+# =============================================================================
+
+def main() -> int:
+    """Execute the Benchmark 1 workflow with command-line configuration.
+    
+    Command-Line Arguments:
+    -----------------------
+    --minimal        : Use minimal mesh extent (20×20×20 μm³, default 8 grains)
+                       Default: Full extent (80×80×80 μm³, default 8 grains)
+    --grains N       : Override grain count (default: 8)
+    --extent Lx,Ly,Lz: Override mesh extent (takes precedence over --minimal)
+    --tol X          : Numerical tolerance for make_krn.py (default: 0.01)
+    --repeats N      : Run workflow N times and compute average
+                       Default: 1 (single run, trivial average)
+    --average-only   : Skip Steps 1-3; only average/plot existing isotrop_run*.dat
+    
+    Workflow Execution:
+    -------------------
+    Always executes via step4_repeat_and_average(), which:
+    1. Runs Steps 1-3 for each iteration (fresh mesh per run)
+    2. Stores results in results/isotrop_runXX.dat
+    3. Computes averaged hysteresis loop (element-wise mean)
+    4. Generates plot of averaged data
+    
+    For single runs (--repeats 1):
+    - Creates results/isotrop_run01.dat
+    - Creates results/isotrop_average.dat (identical to run01)
+    - Creates results/isotrop_average.png
+    - Ensures consistent output structure regardless of num_repeats
+    
+    Output Directory Structure:
+    ---------------------------
+    results/
+        isotrop_run01.dat       (first run)
+        isotrop_run02.dat       (second run, if --repeats > 1)
+        ...
+        isotrop_runNN.dat       (Nth run)
+        isotrop_average.dat     (averaged hysteresis loop)
+        isotrop_average.png     (plot of averaged data)
+    
+    Examples:
+    ---------
+    Single run with minimal mesh:
+        python benchmark1_workflow.py --minimal
+    
+    Multiple runs with full mesh:
+        python benchmark1_workflow.py --repeats 5
+    
+    Multiple runs with minimal mesh:
+        python benchmark1_workflow.py --minimal --repeats 10
+    
+    Returns:
+        Exit code (0 for success)
+    """
+    # Command-line argument parsing
+    parser = argparse.ArgumentParser(
+        description="Benchmark 1 workflow: mesh generation and hysteresis loop simulation",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run with full extent (default)
+  python benchmark1_workflow.py
+  
+  # Run with minimal extent for faster testing
+  python benchmark1_workflow.py --minimal
+  
+  # Run loop.py 10 times without repeat/averaging
+  python benchmark1_workflow.py --loops 10
+  
+  # Repeat entire workflow 3 times with averaging
+  python benchmark1_workflow.py --repeats 3
+        """,
+    )
+    parser.add_argument(
+        "--minimal",
+        action="store_true",
+        help="Use minimal mesh extent (20×20×20 μm³) for faster testing. Default: Full extent (80×80×80 μm³)",
+    )
+    parser.add_argument(
+        "--grains",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override grain count (default: 8)",
+    )
+    parser.add_argument(
+        "--extent",
+        type=str,
+        default=None,
+        metavar="Lx,Ly,Lz",
+        help="Override mesh extent, takes precedence over --minimal (e.g., 40,40,40)",
+    )
+    parser.add_argument(
+        "--tol",
+        type=float,
+        default=0.01,
+        metavar="X",
+        help="Numerical tolerance for make_krn.py (default: 0.01)",
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Number of times to repeat Steps 1-3 for statistical averaging (default: 1)",
+    )
+    parser.add_argument(
+        "--average-only",
+        action="store_true",
+        help="Skip Steps 1-3 and only compute average/plot from existing results/isotrop_run*.dat",
+    )
+    
+    args = parser.parse_args()
+    
+    # Convert CLI argument to NEPER_MINIMAL parameter
+    neper_minimal = 1 if args.minimal else 0
+    grains_override = args.grains
+    extent_override = args.extent
+    tol = args.tol
+    average_only = args.average_only
+    
+    # Resolve paths relative to this script's directory
+    run_dir = Path(__file__).resolve().parent
+    base = run_dir.parent.parent.resolve()
+    benchmark_dir = run_dir
+    
+    # Print configuration summary
+    print("\n" + "=" * 80)
+    print("BENCHMARK 1 WORKFLOW")
+    print("=" * 80)
+    print("[CONFIGURATION]")
+    if extent_override:
+        mesh_extent_str = f"Override ({extent_override})"
+    else:
+        mesh_extent_str = 'Minimal (20×20×20 μm³)' if args.minimal else 'Full (80×80×80 μm³)'
+    print(f"  Mesh extent:  {mesh_extent_str}")
+    grains_str = grains_override if grains_override is not None else 8
+    print(f"  Grain count:  {grains_str}")
+    print(f"  KRN tol:      {tol}")
+    print(f"  Num repeats:  {args.repeats}")
+    print(f"  Average only: {average_only}")
+    print(f"\n[PATH INFO]")
+    print(f"  Base directory:        {base}")
+    print(f"  Examples directory:    {run_dir.parent}")
+    print(f"  Benchmark directory:   {benchmark_dir}")
+    print(f"  Output directory:      {benchmark_dir / 'isotrop_down'}")
+    
+    # Execute workflow via Step 4 (handles both single and multiple repeats)
+    step4_repeat_and_average(
+        base,
+        benchmark_dir,
+        neper_minimal,
+        args.repeats,
+        grains_override,
+        extent_override,
+        tol,
+        average_only,
+    )
+    
+    print("\n" + "=" * 80)
+    print("✓ WORKFLOW COMPLETED SUCCESSFULLY")
+    print("=" * 80)
+    
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
