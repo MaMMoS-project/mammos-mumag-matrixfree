@@ -7,9 +7,9 @@ my = 1.
 mz = 0.
 
 [field]
-hstart = 0.0314
+hstart = 0.035
 hfinal = 0.
-hstep = -0.00025
+hstep = -0.001
 
 hx = 1. 
 hy = 0.
