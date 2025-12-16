@@ -207,9 +207,10 @@ def step2b_copy_to_isotrop_up(benchmark_dir: Path) -> None:
         isotrop_down = benchmark_dir / "isotrop_down"
         isotrop_up = benchmark_dir / "isotrop_up"
         isotrop_up.mkdir(parents=True, exist_ok=True)
-        
-        files_to_copy = ["isotrop.npz", "isotrop.krn", "isotrop.p2"]
-        
+
+        # Always copy mesh + krn; never touch isotrop_up/isotrop.p2 (user-provided)
+        files_to_copy = ["isotrop.npz", "isotrop.krn"]
+
         print(f"\n[CONFIG] Copying files from isotrop_down to isotrop_up")
         for filename in files_to_copy:
             src = isotrop_down / filename
@@ -219,8 +220,15 @@ def step2b_copy_to_isotrop_up(benchmark_dir: Path) -> None:
                 print(f"  ✓ Copied {filename}")
             else:
                 print(f"  [WARNING] ⚠ File not found: {filename}", file=sys.stderr)
-        
-        print(f"\n[RESULT] ✓ Files copied to isotrop_up")
+
+        # Do not copy or overwrite any .p2 file; user must supply isotrop_up/isotrop.p2
+        up_p2 = isotrop_up / "isotrop.p2"
+        if up_p2.exists():
+            print("  ✓ Using existing isotrop_up/isotrop.p2 (left untouched)")
+        else:
+            print("  [WARNING] ⚠ isotrop_up/isotrop.p2 not found; create it with the upward sweep parameters", file=sys.stderr)
+
+        print(f"\n[RESULT] ✓ Files prepared in isotrop_up")
         print(f"[OUTPUT] {isotrop_up}/")
     except Exception as e:
         print(f"\n[ERROR] ✗ File copy failed: {e}", file=sys.stderr)
@@ -423,7 +431,7 @@ def plot_hysteresis_loop(
                 except Exception as overlay_err:
                     print(f"[WARNING] Could not overlay {ofile}: {overlay_err}", file=sys.stderr)
         
-        # Optional overlays for upward runs (lightblue)
+        # Optional overlays for upward runs (orange for contrast)
         if overlay_up_files:
             for ofile in overlay_up_files:
                 try:
@@ -434,7 +442,7 @@ def plot_hysteresis_loop(
                     ax_left.plot(
                         oHext_T,
                         oM_kA_per_m,
-                        color="lightblue",
+                        color="orange",
                         alpha=0.5,
                         linewidth=1.0,
                         label=None,
@@ -442,9 +450,38 @@ def plot_hysteresis_loop(
                 except Exception as overlay_err:
                     print(f"[WARNING] Could not overlay {ofile}: {overlay_err}", file=sys.stderr)
 
-        # Primary axes: bottom in Tesla for averaged curve
-        ax_left.plot(Hext_T, M_kA_per_m, "C0-", linewidth=1.5, label="Hysteresis loop")
-        ax_left.plot(Hext_T, M_kA_per_m, "C0+", markersize=4, alpha=0.6, label="Data points")
+        # Primary axes: bottom in Tesla for averaged curve(s)
+        # If the averaged data contains both directions concatenated (down then up),
+        # split at the minimum H point and color up-loop green for clarity.
+        try:
+            idx_min = int(np.argmin(Hext_T))
+            has_down = idx_min > 0
+            has_up = idx_min < (len(Hext_T) - 1)
+        except Exception:
+            idx_min = None
+            has_down = has_up = False
+
+        if has_down and has_up:
+            # Downward averaged segment: start -> min(H)
+            ax_left.plot(
+                Hext_T[: idx_min + 1],
+                M_kA_per_m[: idx_min + 1],
+                color="C0",
+                linewidth=1.5,
+                label="Average down-ward path of hysteresis loop",
+            )
+            # Upward averaged segment: min(H) -> end
+            ax_left.plot(
+                Hext_T[idx_min :],
+                M_kA_per_m[idx_min :],
+                color="C3",
+                linewidth=1.5,
+                label="Average up-ward path of hysteresis loop",
+            )
+        else:
+            # Fallback: single averaged curve
+            ax_left.plot(Hext_T, M_kA_per_m, "C0-", linewidth=1.5, label="Hysteresis loop")
+            ax_left.plot(Hext_T, M_kA_per_m, "C0+", markersize=4, alpha=0.6, label="Data points")
         ax_left.set_xlabel("Applied Field µ0 Hext (T)", fontsize=11)
         ax_left.set_ylabel("Magnetization M (kA/m)", fontsize=11)
         ax_left.grid(True, alpha=0.3)
