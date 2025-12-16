@@ -30,6 +30,11 @@ The workflow requires an isotrop.p2 file with hysteresis loop parameters:
 - Initial state: mz=1 (saturated along z-axis)
 - Field sweep: 2.0 T → -2.0 T, step 0.01 T, direction: Hz
 - Minimizer: tol_fun=1e-10, tol_hmag_factor=1
+
+Stability tips for make_krn:
+- Few grains (≤5) need a looser tolerance; use tol ≥ 0.05 or increase grains.
+- If you want tight tol (<0.02), increase grain count (e.g., 8+).
+- Very large tol (>0.2) can skew the easy-axis distribution and is not recommended.
 """
 import argparse
 import subprocess
@@ -396,6 +401,21 @@ def step4_repeat_and_average(
     print(f"[CONFIG] Average only:     {average_only}")
     if num_repeats > 1 and not average_only:
         print(f"[CONFIG] This will run Steps 1-3 a total of {num_repeats} times")
+
+    # Warn if tolerance is too tight for low grain counts or excessively large
+    grains_for_check = grains_override if grains_override is not None else 8
+    if grains_for_check <= 5 and tol < 0.02:
+        print(
+            f"[WARNING] Requested tol={tol} with only {grains_for_check} grain(s). "
+            "Use tol >= 0.05 or increase grains to improve convergence.",
+            file=sys.stderr,
+        )
+    if tol > 0.2:
+        print(
+            f"[WARNING] tol={tol} is high and may bias the easy-axis distribution. "
+            "Consider tol in the 0.02-0.1 range.",
+            file=sys.stderr,
+        )
     
     try:
         results_dir = benchmark_dir / "results"
@@ -652,7 +672,7 @@ Examples:
         type=int,
         default=None,
         metavar="N",
-        help="Override grain count (default: 8)",
+        help="Override grain count (default: 8). For tol < 0.02, prefer >= 8 grains.",
     )
     parser.add_argument(
         "--extent",
@@ -666,7 +686,7 @@ Examples:
         type=float,
         default=0.01,
         metavar="X",
-        help="Numerical tolerance for make_krn.py (default: 0.01)",
+        help="Numerical tolerance for make_krn.py (default: 0.01). With <=5 grains use >=0.05; avoid >0.2.",
     )
     parser.add_argument(
         "--repeats",
