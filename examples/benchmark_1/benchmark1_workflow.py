@@ -46,6 +46,8 @@ from typing import List, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 
+# TODO: Add logging instead of print statements for better control over output verbosity.
+#      For now, print statements are used for simplicity and clarity.
 
 # =============================================================================
 # STEP 1: MESH GENERATION
@@ -182,14 +184,58 @@ def step2_build_krn(base: Path, benchmark_dir: Path, tol: float = 0.01) -> None:
 
 
 # =============================================================================
-# STEP 3: RUN HYSTERESIS LOOP
+# STEP 2B: COPY FILES TO ISOTROP_UP
+# =============================================================================
+
+def step2b_copy_to_isotrop_up(benchmark_dir: Path) -> None:
+    """Copy mesh, KRN, and P2 files from isotrop_down to isotrop_up.
+    
+    Prepares isotrop_up directory for upward hysteresis loop simulation
+    by copying all required files from isotrop_down.
+    
+    Input: isotrop_down/isotrop.npz, isotrop_down/isotrop.krn, isotrop_down/isotrop.p2
+    Output: isotrop_up/isotrop.npz, isotrop_up/isotrop.krn, isotrop_up/isotrop.p2
+    
+    Args:
+        benchmark_dir: Benchmark directory (examples/benchmark_1/)
+    """
+    print("\n" + "=" * 80)
+    print("BENCHMARK 1 WORKFLOW - STEP 2B: COPY FILES TO ISOTROP_UP")
+    print("=" * 80)
+    
+    try:
+        isotrop_down = benchmark_dir / "isotrop_down"
+        isotrop_up = benchmark_dir / "isotrop_up"
+        isotrop_up.mkdir(parents=True, exist_ok=True)
+        
+        files_to_copy = ["isotrop.npz", "isotrop.krn", "isotrop.p2"]
+        
+        print(f"\n[CONFIG] Copying files from isotrop_down to isotrop_up")
+        for filename in files_to_copy:
+            src = isotrop_down / filename
+            dst = isotrop_up / filename
+            if src.exists():
+                shutil.copy(src, dst)
+                print(f"  ✓ Copied {filename}")
+            else:
+                print(f"  [WARNING] ⚠ File not found: {filename}", file=sys.stderr)
+        
+        print(f"\n[RESULT] ✓ Files copied to isotrop_up")
+        print(f"[OUTPUT] {isotrop_up}/")
+    except Exception as e:
+        print(f"\n[ERROR] ✗ File copy failed: {e}", file=sys.stderr)
+        raise
+
+
+# =============================================================================
+# STEP 3: RUN HYSTERESIS LOOP (DOWNWARD)
 # =============================================================================
 
 def step3_run_loop(base: Path, benchmark_dir: Path, num_loops: int = 1) -> None:
-    """Run micromagnetic hysteresis loop simulation.
+    """Run micromagnetic hysteresis loop simulation (DOWNWARD path).
     
     Simulates a magnetic field sweep using parameters from isotrop.p2:
-    - Field range: 2.0 T → -2.0 T
+    - Field range: 2.0 T → -2.0 T (DOWNWARD)
     - Field step: 0.01 T
     - Field direction: Hz (z-axis)
     - Initial state: mz=1 (saturated)
@@ -203,7 +249,7 @@ def step3_run_loop(base: Path, benchmark_dir: Path, num_loops: int = 1) -> None:
         num_loops: Number of times to run loop.py (default: 1)
     """
     print("\n" + "=" * 80)
-    print("BENCHMARK 1 WORKFLOW - STEP 3: RUN MICROMAGNETIC LOOP")
+    print("BENCHMARK 1 WORKFLOW - STEP 3: RUN MICROMAGNETIC LOOP (DOWNWARD)")
     print("=" * 80)
     
     try:
@@ -217,9 +263,76 @@ def step3_run_loop(base: Path, benchmark_dir: Path, num_loops: int = 1) -> None:
             print(f"[ERROR] Please create the isotrop.p2 file with hysteresis loop parameters.", file=sys.stderr)
             raise FileNotFoundError(f"Configuration file required: {p2_file}")
         
-        print(f"\n[CONFIG] Hysteresis loop parameters:")
+        print(f"\n[CONFIG] Hysteresis loop parameters (DOWNWARD):")
         print(f"  Field: hstart = 2.0 T, hfinal = -2.0 T, hstep = 0.01 T")
         print(f"  Initial state: mx = 0, my = 0, mz = 1")
+        print(f"  Direction: Hz (along z-axis)")
+        print(f"  Number of runs: {num_loops}")
+        
+        loop_script = (base / "src/loop.py").resolve()
+        
+        for loop_idx in range(1, num_loops + 1):
+            if num_loops > 1:
+                print(f"\n[LOOP] Run {loop_idx}/{num_loops}")
+            
+            loop_cmd = [
+                sys.executable, str(loop_script),
+                "--mesh", str(mesh_path)
+            ]
+            
+            print(f"\n[COMMAND] {' '.join(loop_cmd)}")
+            print("[SIMULATION] Running micromagnetic hysteresis loop...")
+            subprocess.run(loop_cmd, check=True, cwd=str(isotrop_dir))
+        
+        print(f"\n[RESULT] ✓ Loop simulation complete ({num_loops} run{'s' if num_loops > 1 else ''})")
+        print(f"[OUTPUT] Results saved in {isotrop_dir}/")
+    except subprocess.CalledProcessError as e:
+        print(f"\n[ERROR] ✗ Loop simulation failed: {e}", file=sys.stderr)
+        raise
+    except FileNotFoundError as e:
+        print(f"\n[ERROR] ✗ {e}", file=sys.stderr)
+        raise
+
+
+# =============================================================================
+# STEP 3B: RUN HYSTERESIS LOOP (UPWARD)
+# =============================================================================
+
+def step3b_run_loop_up(base: Path, benchmark_dir: Path, num_loops: int = 1) -> None:
+    """Run micromagnetic hysteresis loop simulation (UPWARD path).
+    
+    Simulates a magnetic field sweep using parameters from isotrop.p2:
+    - Field range: -2.0 T → 2.0 T (UPWARD)
+    - Field step: 0.01 T
+    - Field direction: Hz (z-axis)
+    - Initial state: mz=-1 (saturated negative)
+    
+    Input: isotrop_up/isotrop.npz (mesh), isotrop_up/isotrop.krn (material), isotrop_up/isotrop.p2 (parameters)
+    Output: isotrop_up/isotrop.dat (hysteresis data), isotrop_up/*.state.npz (magnetization states)
+    
+    Args:
+        base: Base directory of the project (contains src/)
+        benchmark_dir: Benchmark directory (examples/benchmark_1/)
+        num_loops: Number of times to run loop.py (default: 1)
+    """
+    print("\n" + "=" * 80)
+    print("BENCHMARK 1 WORKFLOW - STEP 3B: RUN MICROMAGNETIC LOOP (UPWARD)")
+    print("=" * 80)
+    
+    try:
+        isotrop_dir = benchmark_dir / "isotrop_up"
+        mesh_path = (isotrop_dir / "isotrop").resolve()
+        p2_file = isotrop_dir / "isotrop.p2"
+        
+        # Check if p2 file exists
+        if not p2_file.exists():
+            print(f"\n[ERROR] ✗ Configuration file not found: {p2_file}", file=sys.stderr)
+            print(f"[ERROR] Please create the isotrop.p2 file with hysteresis loop parameters.", file=sys.stderr)
+            raise FileNotFoundError(f"Configuration file required: {p2_file}")
+        
+        print(f"\n[CONFIG] Hysteresis loop parameters (UPWARD):")
+        print(f"  Field: hstart = -2.0 T, hfinal = 2.0 T, hstep = 0.01 T")
+        print(f"  Initial state: mx = 0, my = 0, mz = -1")
         print(f"  Direction: Hz (along z-axis)")
         print(f"  Number of runs: {num_loops}")
         
@@ -252,12 +365,17 @@ def step3_run_loop(base: Path, benchmark_dir: Path, num_loops: int = 1) -> None:
 # PLOTTING UTILITIES
 # =============================================================================
 
-def plot_hysteresis_loop(data_file: Path, output_file: Path, overlay_files: Optional[List[Path]] = None) -> None:
+def plot_hysteresis_loop(
+    data_file: Path, 
+    output_file: Path, 
+    overlay_down_files: Optional[List[Path]] = None,
+    overlay_up_files: Optional[List[Path]] = None
+) -> None:
     """Plot hysteresis loop from .dat file.
     
     Creates a publication-quality plot showing applied field vs. magnetization.
     Converts data from Tesla to kA/m for both axes.
-    Optionally overlays individual run curves behind the averaged curve.
+    Optionally overlays individual run curves for both downward and upward paths.
     
     Input: .dat file with columns [vtu_idx, mu0*Hext(T), J·h(T), ...]
     Output: PNG plot at 300 dpi
@@ -265,7 +383,8 @@ def plot_hysteresis_loop(data_file: Path, output_file: Path, overlay_files: Opti
     Args:
         data_file: Path to .dat file containing hysteresis loop data (average)
         output_file: Path where PNG will be saved
-        overlay_files: Optional list of .dat files to plot behind the average (alpha=0.5)
+        overlay_down_files: Optional list of downward .dat files to plot (alpha=0.5, gray)
+        overlay_up_files: Optional list of upward .dat files to plot (alpha=0.5, lightblue)
     """
     try:
         # Load data, skipping header line
@@ -285,9 +404,9 @@ def plot_hysteresis_loop(data_file: Path, output_file: Path, overlay_files: Opti
         # Create plot with secondary axes (bottom: Tesla, top: kA/m)
         fig, ax_left = plt.subplots(figsize=(10, 6))
 
-        # Optional overlays (individual runs) plotted behind average
-        if overlay_files:
-            for ofile in overlay_files:
+        # Optional overlays for downward runs (gray)
+        if overlay_down_files:
+            for ofile in overlay_down_files:
                 try:
                     odata = np.loadtxt(ofile, skiprows=1)
                     oHext_T = odata[:, 1]
@@ -297,6 +416,25 @@ def plot_hysteresis_loop(data_file: Path, output_file: Path, overlay_files: Opti
                         oHext_T,
                         oM_kA_per_m,
                         color="gray",
+                        alpha=0.5,
+                        linewidth=1.0,
+                        label=None,
+                    )
+                except Exception as overlay_err:
+                    print(f"[WARNING] Could not overlay {ofile}: {overlay_err}", file=sys.stderr)
+        
+        # Optional overlays for upward runs (lightblue)
+        if overlay_up_files:
+            for ofile in overlay_up_files:
+                try:
+                    odata = np.loadtxt(ofile, skiprows=1)
+                    oHext_T = odata[:, 1]
+                    oJ_h_T = odata[:, 2]
+                    oM_kA_per_m = oJ_h_T / mu0 / 1e3
+                    ax_left.plot(
+                        oHext_T,
+                        oM_kA_per_m,
+                        color="lightblue",
                         alpha=0.5,
                         linewidth=1.0,
                         label=None,
@@ -356,6 +494,7 @@ def step4_repeat_and_average(
     extent_override: Optional[str] = None,
     tol: float = 0.01,
     average_only: bool = False,
+    backup_existing: bool = False,
 ) -> None:
     """Repeat Steps 1-3 multiple times and compute averaged hysteresis loop.
     
@@ -389,6 +528,7 @@ def step4_repeat_and_average(
         extent_override: Optional custom extent string "Lx,Ly,Lz" (takes precedence)
         tol: Numerical tolerance forwarded to make_krn.py (default 0.01)
         average_only: If True, skip Steps 1-3 and only perform averaging/plotting
+        backup_existing: If True, backup existing result files to .dat.bak before overwriting
     """
     print("\n" + "=" * 80)
     if num_repeats > 1:
@@ -437,27 +577,57 @@ def step4_repeat_and_average(
                     print("-" * 80)
                 
                 # Clean up previous isotrop outputs for this run
-                isotrop_dir = benchmark_dir / "isotrop_down"
-                for file in isotrop_dir.glob("isotrop.dat"):
-                    file.unlink()
-                for file in isotrop_dir.glob("isotrop.*.state.npz"):
-                    file.unlink()
+                for direction in ["isotrop_down", "isotrop_up"]:
+                    isotrop_dir = benchmark_dir / direction
+                    for file in isotrop_dir.glob("isotrop.dat"):
+                        file.unlink()
+                    for file in isotrop_dir.glob("isotrop.*.state.npz"):
+                        file.unlink()
                 
-                # Run steps 1-3
+                # Run steps 1-3 (mesh, krn, downward loop)
                 step1_generate_mesh(base, benchmark_dir, neper_minimal, grains_override, extent_override)
                 step2_build_krn(base, benchmark_dir, tol)
+                step2b_copy_to_isotrop_up(benchmark_dir)
                 step3_run_loop(base, benchmark_dir)
+                step3b_run_loop_up(base, benchmark_dir)
                 
-                # Copy results to results directory
-                isotrop_dat = isotrop_dir / "isotrop.dat"
-                if isotrop_dat.exists():
-                    run_result_file = results_dir / f"isotrop_run{run_idx:02d}.dat"
-                    shutil.copy(isotrop_dat, run_result_file)
+                # Check for existing result files and optionally backup
+                if run_idx == 1:  # Only check once at the start of first iteration
+                    existing_files = list(results_dir.glob("isotrop_*_run*.dat"))
+                    if existing_files:
+                        print(f"\n[WARNING] Found {len(existing_files)} existing result file(s) in {results_dir}/", file=sys.stderr)
+                        if backup_existing:
+                            print(f"[INFO] Backing up existing files to .dat.bak", file=sys.stderr)
+                            for existing_file in existing_files:
+                                backup_file = existing_file.with_suffix(".dat.bak")
+                                shutil.move(str(existing_file), str(backup_file))
+                                print(f"  ✓ Backed up {existing_file.name} → {backup_file.name}")
+                        else:
+                            print(f"[INFO] Existing files will be overwritten (use --backup to preserve them)", file=sys.stderr)
+
+                # Copy downward results to results directory
+                isotrop_down_dir = benchmark_dir / "isotrop_down"
+                isotrop_down_dat = isotrop_down_dir / "isotrop.dat"
+                if isotrop_down_dat.exists():
+                    run_result_file = results_dir / f"isotrop_down_run{run_idx:02d}.dat"
+                    shutil.copy(isotrop_down_dat, run_result_file)
                     loop_data_files.append(run_result_file)
                     if num_repeats > 1:
-                        print(f"[RESULT] ✓ Saved run {run_idx}: {run_result_file.name}")
+                        print(f"[RESULT] ✓ Saved downward run {run_idx}: {run_result_file.name}")
                 else:
-                    print(f"[WARNING] ⚠ Run {run_idx}: No isotrop.dat file found", file=sys.stderr)
+                    print(f"[WARNING] ⚠ Run {run_idx}: No isotrop_down.dat file found", file=sys.stderr)
+                
+                # Copy upward results to results directory
+                isotrop_up_dir = benchmark_dir / "isotrop_up"
+                isotrop_up_dat = isotrop_up_dir / "isotrop.dat"
+                if isotrop_up_dat.exists():
+                    run_result_file = results_dir / f"isotrop_up_run{run_idx:02d}.dat"
+                    shutil.copy(isotrop_up_dat, run_result_file)
+                    loop_data_files.append(run_result_file)
+                    if num_repeats > 1:
+                        print(f"[RESULT] ✓ Saved upward run {run_idx}: {run_result_file.name}")
+                else:
+                    print(f"[WARNING] ⚠ Run {run_idx}: No isotrop_up.dat file found", file=sys.stderr)
         else:
             print("\n" + "=" * 80)
             print("STEP A: FILE STORAGE - Skipped (average-only mode)")
@@ -471,113 +641,162 @@ def step4_repeat_and_average(
         if num_repeats == 1 and not average_only:
             print(f"\n[INFO] Single run: averaging trivial (1 file), but will create average file and plot for consistency")
         if average_only:
-            print(f"\n[INFO] Average-only mode: using existing isotrop_run*.dat files in results/")
+            print(f"\n[INFO] Average-only mode: using existing isotrop_down_run*.dat and isotrop_up_run*.dat files in results/")
         
-        # Discover all .dat files in results directory
-        dat_files = sorted(results_dir.glob("isotrop_run*.dat"))
+        # Discover downward and upward .dat files separately
+        dat_files_down = sorted(results_dir.glob("isotrop_down_run*.dat"))
+        dat_files_up = sorted(results_dir.glob("isotrop_up_run*.dat"))
         
-        if not dat_files:
+        if not dat_files_down and not dat_files_up:
             print("[WARNING] No hysteresis loop data files found for averaging")
             print(f"\n[RESULT] ✓ Repeat workflow complete (no averaging performed)")
             print(f"[OUTPUT] Results directory: {results_dir}/")
             return
         
         print(f"\n[B.1] DISCOVERY")
-        print(f"  Found {len(dat_files)} .dat files in {results_dir}/")
-        for f in dat_files:
+        print(f"  Found {len(dat_files_down)} downward .dat files in {results_dir}/")
+        for f in dat_files_down:
+            print(f"    • {f.name}")
+        print(f"  Found {len(dat_files_up)} upward .dat files in {results_dir}/")
+        for f in dat_files_up:
             print(f"    • {f.name}")
         
         # Validate run indices consistency
         print(f"\n[B.2] VALIDATION")
-        run_indices = []
-        for dat_file in dat_files:
-            # Extract run index from filename: isotrop_run{idx:02d}.dat
-            idx_str = dat_file.stem.replace("isotrop_run", "")
-            try:
-                run_idx = int(idx_str)
-                run_indices.append(run_idx)
-            except ValueError:
-                print(f"  [WARNING] ⚠ Could not parse index from {dat_file.name}", file=sys.stderr)
         
-        # Check consistency: indices should be 1, 2, 3, ..., N
-        expected_indices = list(range(1, len(dat_files) + 1))
-        run_indices_sorted = sorted(run_indices)
-        
-        if run_indices_sorted == expected_indices:
-            print(f"  ✓ Run indices are consistent: {run_indices_sorted}")
-        else:
-            print(f"  [WARNING] ⚠ Run indices are NOT consistent!", file=sys.stderr)
-            print(f"    Expected: {expected_indices}", file=sys.stderr)
-            print(f"    Found:    {run_indices_sorted}", file=sys.stderr)
-            print(f"    Proceeding with available files...", file=sys.stderr)
-        
-        # Load all data files and compute average
-        print(f"\n[B.3] DATA LOADING AND AVERAGING")
-        print(f"  Loading data from {len(dat_files)} files...")
-        
-        all_data = []
-        header_line = None
-        
-        for dat_file in dat_files:
-            # Read header (first line starting with #)
-            with open(dat_file, 'r') as f:
-                header_line = f.readline().strip()
+        def validate_indices(dat_files, label):
+            run_indices = []
+            for dat_file in dat_files:
+                # Extract run index from filename: isotrop_{direction}_run{idx:02d}.dat
+                idx_str = dat_file.stem.replace("isotrop_down_run", "").replace("isotrop_up_run", "")
+                try:
+                    run_idx = int(idx_str)
+                    run_indices.append(run_idx)
+                except ValueError:
+                    print(f"  [WARNING] ⚠ Could not parse index from {dat_file.name}", file=sys.stderr)
             
-            # Load numeric data, skipping the header line
-            data = np.loadtxt(dat_file, skiprows=1)
-            all_data.append(data)
-            print(f"    ✓ Loaded {dat_file.name}: shape {data.shape}")
+            expected_indices = list(range(1, len(dat_files) + 1))
+            run_indices_sorted = sorted(run_indices)
+            
+            if run_indices_sorted == expected_indices:
+                print(f"  ✓ {label} indices are consistent: {run_indices_sorted}")
+            else:
+                print(f"  [WARNING] ⚠ {label} indices are NOT consistent!", file=sys.stderr)
+                print(f"    Expected: {expected_indices}", file=sys.stderr)
+                print(f"    Found:    {run_indices_sorted}", file=sys.stderr)
         
-        # Ensure all arrays have the same shape
-        if len(all_data) > 1:
-            shapes = [d.shape for d in all_data]
-            if not all(s == shapes[0] for s in shapes):
-                print(f"  [WARNING] ⚠ Data files have different shapes!", file=sys.stderr)
-                print(f"    Shapes: {shapes}", file=sys.stderr)
-                print(f"    This may indicate inconsistent simulation results.", file=sys.stderr)
+        if dat_files_down:
+            validate_indices(dat_files_down, "Downward")
+        if dat_files_up:
+            validate_indices(dat_files_up, "Upward")
         
-        # Stack all data and compute mean
-        data_stack = np.stack(all_data, axis=0)  # Shape: (num_runs, num_rows, num_cols)
-        data_average = np.mean(data_stack, axis=0)  # Average over runs: (num_rows, num_cols)
+        # Load and average downward data
+        print(f"\n[B.3] DATA LOADING AND AVERAGING - DOWNWARD")
+        header_line = None
+        data_average_down = None
         
-        print(f"\n  ✓ Data averaging completed")
-        print(f"    Input shape:  {data_stack.shape} (num_runs={data_stack.shape[0]}, "
-              f"num_rows={data_stack.shape[1]}, num_cols={data_stack.shape[2]})")
-        print(f"    Output shape: {data_average.shape} (num_rows, num_cols)")
-        print(f"    Averaging method: Element-wise mean (numpy.mean along axis 0)")
+        if dat_files_down:
+            print(f"  Loading data from {len(dat_files_down)} downward files...")
+            all_data_down = []
+            
+            for dat_file in dat_files_down:
+                with open(dat_file, 'r') as f:
+                    header_line = f.readline().strip()
+                data = np.loadtxt(dat_file, skiprows=1)
+                all_data_down.append(data)
+                print(f"    ✓ Loaded {dat_file.name}: shape {data.shape}")
+            
+            if len(all_data_down) > 1:
+                shapes = [d.shape for d in all_data_down]
+                if not all(s == shapes[0] for s in shapes):
+                    print(f"  [WARNING] ⚠ Downward data files have different shapes!", file=sys.stderr)
+            
+            data_stack_down = np.stack(all_data_down, axis=0)
+            data_average_down = np.mean(data_stack_down, axis=0)
+            
+            print(f"\n  ✓ Downward data averaging completed")
+            print(f"    Input shape:  {data_stack_down.shape}")
+            print(f"    Output shape: {data_average_down.shape}")
+        
+        # Load and average upward data
+        print(f"\n[B.4] DATA LOADING AND AVERAGING - UPWARD")
+        data_average_up = None
+        
+        if dat_files_up:
+            print(f"  Loading data from {len(dat_files_up)} upward files...")
+            all_data_up = []
+            
+            for dat_file in dat_files_up:
+                with open(dat_file, 'r') as f:
+                    header_line = f.readline().strip()
+                data = np.loadtxt(dat_file, skiprows=1)
+                all_data_up.append(data)
+                print(f"    ✓ Loaded {dat_file.name}: shape {data.shape}")
+            
+            if len(all_data_up) > 1:
+                shapes = [d.shape for d in all_data_up]
+                if not all(s == shapes[0] for s in shapes):
+                    print(f"  [WARNING] ⚠ Upward data files have different shapes!", file=sys.stderr)
+            
+            data_stack_up = np.stack(all_data_up, axis=0)
+            data_average_up = np.mean(data_stack_up, axis=0)
+            
+            print(f"\n  ✓ Upward data averaging completed")
+            print(f"    Input shape:  {data_stack_up.shape}")
+            print(f"    Output shape: {data_average_up.shape}")
+        
+        # Combine downward and upward averages
+        print(f"\n[B.5] COMBINING AVERAGES")
+        if data_average_down is not None and data_average_up is not None:
+            data_average = np.vstack([data_average_down, data_average_up])
+            print(f"  ✓ Combined downward and upward averages")
+            print(f"    Combined shape: {data_average.shape}")
+        elif data_average_down is not None:
+            data_average = data_average_down
+            print(f"  Using downward average only (no upward data)")
+        elif data_average_up is not None:
+            data_average = data_average_up
+            print(f"  Using upward average only (no downward data)")
+        else:
+            print(f"  [ERROR] No data to average!", file=sys.stderr)
+            return
         
         # Write averaged data to file
         avg_file = results_dir / "isotrop_average.dat"
-        print(f"\n[B.4] WRITING RESULTS")
+        print(f"\n[B.6] WRITING RESULTS")
         print(f"  Saving averaged data to: {avg_file}")
         
         with open(avg_file, 'w') as f:
-            # Write header
             f.write(header_line + "\n")
-            # Write averaged data with appropriate formatting
             np.savetxt(f, data_average, fmt='%3d' if data_average.dtype == int else '%e', 
                       delimiter='  ')
         
         print(f"  ✓ Successfully wrote {avg_file.name}")
         print(f"    File size: {avg_file.stat().st_size / 1024:.2f} KB")
         
-        # Generate plot for averaged data
-        print(f"\n[B.5] GENERATING PLOT")
+        # Generate plot for averaged data with both directions
+        print(f"\n[B.7] GENERATING PLOT")
         plot_file = results_dir / "isotrop_average.png"
-        plot_hysteresis_loop(avg_file, plot_file, overlay_files=dat_files)
+        plot_hysteresis_loop(avg_file, plot_file, 
+                           overlay_down_files=dat_files_down,
+                           overlay_up_files=dat_files_up)
         
         # Summary
         print("\n" + "=" * 80)
         print("STEP 4 SUMMARY")
         print("=" * 80)
+        total_files = len(dat_files_down) + len(dat_files_up)
         if average_only:
-            print(f"[STEP A] Found {len(dat_files)} existing run files in results/ directory")
+            print(f"[STEP A] Found {total_files} existing run files ({len(dat_files_down)} down, {len(dat_files_up)} up) in results/ directory")
         else:
-            print(f"[STEP A] Stored {len(dat_files)} individual run files in results/ directory")
-        print(f"[STEP B] Averaged {len(dat_files)} runs to create isotrop_average.dat")
+            print(f"[STEP A] Stored {total_files} individual run files ({len(dat_files_down)} down, {len(dat_files_up)} up) in results/ directory")
+        print(f"[STEP B] Averaged {len(dat_files_down)} downward and {len(dat_files_up)} upward runs")
         print(f"\n[OUTPUT]")
-        print(f"  Individual runs: {results_dir}/isotrop_run01.dat ... isotrop_run{len(dat_files):02d}.dat")
-        print(f"  Average result:  {avg_file}")
+        if dat_files_down:
+            print(f"  Downward runs: {results_dir}/isotrop_down_run01.dat ... isotrop_down_run{len(dat_files_down):02d}.dat")
+        if dat_files_up:
+            print(f"  Upward runs:   {results_dir}/isotrop_up_run01.dat ... isotrop_up_run{len(dat_files_up):02d}.dat")
+        print(f"  Average result: {avg_file}")
         
         print(f"\n[RESULT] ✓ Repeat and average workflow complete")
         print(f"[OUTPUT] Results directory: {results_dir}/")
@@ -700,6 +919,11 @@ Examples:
         action="store_true",
         help="Skip Steps 1-3 and only compute average/plot from existing results/isotrop_run*.dat",
     )
+    parser.add_argument(
+        "--backup",
+        action="store_true",
+        help="Backup existing result files to .dat.bak before overwriting (default: overwrite without backup)",
+    )
     
     args = parser.parse_args()
     
@@ -709,6 +933,7 @@ Examples:
     extent_override = args.extent
     tol = args.tol
     average_only = args.average_only
+    backup_existing = args.backup
     
     # Resolve paths relative to this script's directory
     run_dir = Path(__file__).resolve().parent
@@ -730,6 +955,7 @@ Examples:
     print(f"  KRN tol:      {tol}")
     print(f"  Num repeats:  {args.repeats}")
     print(f"  Average only: {average_only}")
+    print(f"  Backup files: {backup_existing}")
     print(f"\n[PATH INFO]")
     print(f"  Base directory:        {base}")
     print(f"  Examples directory:    {run_dir.parent}")
@@ -746,6 +972,7 @@ Examples:
         extent_override,
         tol,
         average_only,
+        backup_existing,
     )
     
     print("\n" + "=" * 80)
