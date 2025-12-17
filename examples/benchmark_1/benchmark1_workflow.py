@@ -377,7 +377,8 @@ def plot_hysteresis_loop(
     data_file: Path, 
     output_file: Path, 
     overlay_down_files: Optional[List[Path]] = None,
-    overlay_up_files: Optional[List[Path]] = None
+    overlay_up_files: Optional[List[Path]] = None,
+    num_runs: Optional[int] = None
 ) -> None:
     """Plot hysteresis loop from .dat file.
     
@@ -393,6 +394,7 @@ def plot_hysteresis_loop(
         output_file: Path where PNG will be saved
         overlay_down_files: Optional list of downward .dat files to plot (alpha=0.5, gray)
         overlay_up_files: Optional list of upward .dat files to plot (alpha=0.5, lightblue)
+        num_runs: Optional number of runs used for averaging (shown in title)
     """
     try:
         # Load data, skipping header line
@@ -504,7 +506,11 @@ def plot_hysteresis_loop(
         # Round top-axis ticks to whole numbers (kA/m) with no decimal part
         ax_top.set_xticklabels([f"{tick / mu0 / 1e3:.0f}" for tick in top_ticks])
 
-        ax_left.set_title("Averaged Hysteresis Loop", fontsize=12, fontweight="bold")
+        # Build title with optional run count
+        title = "Averaged Hysteresis Loop"
+        if num_runs is not None and num_runs > 0:
+            title += f" (n={num_runs} runs)"
+        ax_left.set_title(title, fontsize=12, fontweight="bold")
         ax_left.legend(loc="best", fontsize=10)
         fig.tight_layout()
         
@@ -909,9 +915,11 @@ def step4_repeat_and_average(
         # Generate plot for averaged data with both directions
         print(f"\n[B.7] GENERATING PLOT")
         plot_file = results_dir / "isotrop_average.png"
+        total_runs = len(dat_files_down) + len(dat_files_up)
         plot_hysteresis_loop(avg_file, plot_file, 
                            overlay_down_files=dat_files_down,
-                           overlay_up_files=dat_files_up)
+                           overlay_up_files=dat_files_up,
+                           num_runs=total_runs)
         
         # Summary
         print("\n" + "=" * 80)
