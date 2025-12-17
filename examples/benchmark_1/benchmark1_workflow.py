@@ -532,6 +532,7 @@ def step4_repeat_and_average(
     tol: float = 0.01,
     average_only: bool = False,
     backup_existing: bool = False,
+    clean_results: bool = False,
 ) -> None:
     """Repeat Steps 1-3 multiple times and compute averaged hysteresis loop.
     
@@ -597,6 +598,43 @@ def step4_repeat_and_average(
     try:
         results_dir = benchmark_dir / "results"
         results_dir.mkdir(parents=True, exist_ok=True)
+
+        # Cleanup: remove or backup existing results to avoid mixing stale files
+        # Skip cleanup in average-only mode to preserve existing files for averaging
+        existing_run_files = sorted(results_dir.glob("isotrop_*_run*.dat"))
+        average_files = [results_dir / "isotrop_average.dat", results_dir / "isotrop_average.png"]
+        has_avg = any(f.exists() for f in average_files)
+        if not average_only and (existing_run_files or has_avg):
+            print("\n[INFO] Cleaning previous results to avoid mixing stale files")
+            if backup_existing:
+                try:
+                    from datetime import datetime
+                    stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+                except Exception:
+                    stamp = "backup"
+                for f in existing_run_files:
+                    backup_file = f.with_suffix(f.suffix + f".{stamp}.bak")
+                    shutil.move(str(f), str(backup_file))
+                    print(f"  ✓ Backed up {f.name} → {backup_file.name}")
+                for f in average_files:
+                    if f.exists():
+                        backup_file = f.with_suffix(f.suffix + f".{stamp}.bak")
+                        shutil.move(str(f), str(backup_file))
+                        print(f"  ✓ Backed up {f.name} → {backup_file.name}")
+            else:
+                for f in existing_run_files:
+                    try:
+                        f.unlink()
+                        print(f"  ✓ Removed {f.name}")
+                    except Exception as rm_err:
+                        print(f"  [WARNING] Could not remove {f}: {rm_err}", file=sys.stderr)
+                for f in average_files:
+                    if f.exists():
+                        try:
+                            f.unlink()
+                            print(f"  ✓ Removed {f.name}")
+                        except Exception as rm_err:
+                            print(f"  [WARNING] Could not remove {f}: {rm_err}", file=sys.stderr)
         
         # ===== STEP A: FILE STORAGE =====
         if not average_only:
@@ -612,6 +650,10 @@ def step4_repeat_and_average(
                     print("\n" + "-" * 80)
                     print(f"RUN {run_idx}/{num_repeats}")
                     print("-" * 80)
+                
+                # Generate timestamp for this run (shared by down and up files)
+                from datetime import datetime
+                run_timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
                 
                 # Clean up previous isotrop outputs for this run
                 for direction in ["isotrop_down", "isotrop_up"]:
@@ -646,7 +688,7 @@ def step4_repeat_and_average(
                 isotrop_down_dir = benchmark_dir / "isotrop_down"
                 isotrop_down_dat = isotrop_down_dir / "isotrop.dat"
                 if isotrop_down_dat.exists():
-                    run_result_file = results_dir / f"isotrop_down_run{run_idx:02d}.dat"
+                    run_result_file = results_dir / f"isotrop_down_{run_timestamp}_run{run_idx:02d}.dat"
                     shutil.copy(isotrop_down_dat, run_result_file)
                     loop_data_files.append(run_result_file)
                     if num_repeats > 1:
@@ -658,7 +700,7 @@ def step4_repeat_and_average(
                 isotrop_up_dir = benchmark_dir / "isotrop_up"
                 isotrop_up_dat = isotrop_up_dir / "isotrop.dat"
                 if isotrop_up_dat.exists():
-                    run_result_file = results_dir / f"isotrop_up_run{run_idx:02d}.dat"
+                    run_result_file = results_dir / f"isotrop_up_{run_timestamp}_run{run_idx:02d}.dat"
                     shutil.copy(isotrop_up_dat, run_result_file)
                     loop_data_files.append(run_result_file)
                     if num_repeats > 1:
@@ -681,8 +723,9 @@ def step4_repeat_and_average(
             print(f"\n[INFO] Average-only mode: using existing isotrop_down_run*.dat and isotrop_up_run*.dat files in results/")
         
         # Discover downward and upward .dat files separately
-        dat_files_down = sorted(results_dir.glob("isotrop_down_run*.dat"))
-        dat_files_up = sorted(results_dir.glob("isotrop_up_run*.dat"))
+        # Format: isotrop_down_YYYYMMDDTHHMMSSZ_run01.dat
+        dat_files_down = sorted(results_dir.glob("isotrop_down_*run*.dat"))
+        dat_files_up = sorted(results_dir.glob("isotrop_up_*run*.dat"))
         
         if not dat_files_down and not dat_files_up:
             print("[WARNING] No hysteresis loop data files found for averaging")
@@ -698,18 +741,70 @@ def step4_repeat_and_average(
         for f in dat_files_up:
             print(f"    • {f.name}")
         
+        # Optionally prune mismatched files (average-only mode):
+        # Remove files whose number of data rows differs from the mode to prevent shape errors.
+        def _count_data_rows(p: Path) -> int:
+            try:
+                with open(p, 'r') as fh:
+                    # subtract 1 for header
+                    n = sum(1 for _ in fh) - 1
+                    return max(n, 0)
+            except Exception:
+                return -1
+
+        def _prune_mismatched(files: list[Path], label: str) -> list[Path]:
+            if len(files) <= 1:
+                return files
+            row_counts = {}
+            for p in files:
+                row_counts[p] = _count_data_rows(p)
+            # Build frequency map (rows -> count of files)
+            freq: dict[int, int] = {}
+            for rows in row_counts.values():
+                freq[rows] = freq.get(rows, 0) + 1
+            # Mode: most frequent row count; if tie, prefer the larger row count
+            mode_rows = max(sorted(freq.keys()), key=lambda k: (freq[k], k))
+            to_keep = [p for p in files if row_counts.get(p, -1) == mode_rows]
+            to_drop = [p for p in files if row_counts.get(p, -1) != mode_rows]
+            if to_drop:
+                print(f"\n[INFO] Pruning {label} files with mismatched shape (rows != {mode_rows})")
+                for p in to_drop:
+                    if backup_existing:
+                        backup_file = p.with_suffix(p.suffix + ".pruned.bak")
+                        try:
+                            shutil.move(str(p), str(backup_file))
+                            print(f"  ✓ Backed up {p.name} → {backup_file.name}")
+                        except Exception as e:
+                            print(f"  [WARNING] Could not backup {p.name}: {e}", file=sys.stderr)
+                    else:
+                        try:
+                            p.unlink()
+                            print(f"  ✓ Removed {p.name}")
+                        except Exception as e:
+                            print(f"  [WARNING] Could not remove {p.name}: {e}", file=sys.stderr)
+            return to_keep
+
+        if average_only:
+            dat_files_down = _prune_mismatched(dat_files_down, "downward")
+            dat_files_up   = _prune_mismatched(dat_files_up,   "upward")
+        
         # Validate run indices consistency
         print(f"\n[B.2] VALIDATION")
         
         def validate_indices(dat_files, label):
             run_indices = []
             for dat_file in dat_files:
-                # Extract run index from filename: isotrop_{direction}_run{idx:02d}.dat
-                idx_str = dat_file.stem.replace("isotrop_down_run", "").replace("isotrop_up_run", "")
-                try:
-                    run_idx = int(idx_str)
-                    run_indices.append(run_idx)
-                except ValueError:
+                # Extract run index from filename: isotrop_{direction}_YYYYMMDDTHHMMSSZ_run{idx:02d}.dat
+                stem = dat_file.stem
+                # Find last occurrence of '_run' and extract number after it
+                if '_run' in stem:
+                    idx_str = stem.split('_run')[-1]
+                    try:
+                        run_idx = int(idx_str)
+                        run_indices.append(run_idx)
+                    except ValueError:
+                        print(f"  [WARNING] ⚠ Could not parse index from {dat_file.name}", file=sys.stderr)
+                else:
                     print(f"  [WARNING] ⚠ Could not parse index from {dat_file.name}", file=sys.stderr)
             
             expected_indices = list(range(1, len(dat_files) + 1))
@@ -961,6 +1056,11 @@ Examples:
         action="store_true",
         help="Backup existing result files to .dat.bak before overwriting (default: overwrite without backup)",
     )
+    parser.add_argument(
+        "--clean-results",
+        action="store_true",
+        help="Remove (or backup with --backup) existing results in results/ before averaging (useful with --average-only)",
+    )
     
     args = parser.parse_args()
     
@@ -971,6 +1071,7 @@ Examples:
     tol = args.tol
     average_only = args.average_only
     backup_existing = args.backup
+    clean_results = args.clean_results
     
     # Resolve paths relative to this script's directory
     run_dir = Path(__file__).resolve().parent
@@ -1010,6 +1111,7 @@ Examples:
         tol,
         average_only,
         backup_existing,
+        clean_results,
     )
     
     print("\n" + "=" * 80)
