@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from typing import Union
+
 from geom import TetGeom
 
 # Vacuum permeability (H/m)
@@ -49,17 +49,12 @@ def exchange_energy_and_grad(
 # ---------------------------------
 # Uniaxial anisotropy (value + grad)
 # ---------------------------------
-
-
-import jax
-import jax.numpy as jnp
-
-
 def orthorhombic_anisotropy_energy_and_grad_ip(
     m_nodes: jnp.ndarray,  # (N, 3)
     geom,  # TetGeom: conn:(E,4); volume:(E,); mat_id:(E,)
     K1_lookup: jnp.ndarray,  # (G,)
     K1p_lookup: jnp.ndarray,  # (G,)
+    rotation_matrix_e: jnp.ndarray,  # (E, 3, 3) unit easy axis per element
 ):
     """
     Orthorhombic anisotropy energy and gradient using 4-point tetrahedral quadrature.
@@ -73,8 +68,13 @@ def orthorhombic_anisotropy_energy_and_grad_ip(
     K1p_e = K1p_lookup[g_ids]  # (E,)
 
     # Gather nodal magnetization per element: (E, 4, 3)
-    m_e = m_nodes[conn]
 
+    print("x" * 35)
+    print(conn)
+    # jax.debug.print("conn : {conn}", conn=conn)
+    print(f"shape of m_nodes: {m_nodes.shape}")
+    print(f"shape of conn: {conn.shape}")
+    m_e = m_nodes[conn]
     # Quadrature: 4-point barycentric coords and weights
     ip_bary = jnp.array(
         [
@@ -85,17 +85,23 @@ def orthorhombic_anisotropy_energy_and_grad_ip(
         ]
     )  # (Q=4, 4)
     ip_weights = jnp.array([0.25, 0.25, 0.25, 0.25])  # (Q,)
-
-    # Interpolate magnetization at integration points: (E, Q, 3)
+    print()
     m_ip = jnp.einsum("qa,eac->eqc", ip_bary, m_e)
+    print(f"shape of m_ip: {m_ip.shape}")
+    m_local = jnp.einsum("eij,eaj->eai", rotation_matrix_e, m_ip)
+    print(f"shape of m_local: {m_local.shape}")
+    # Interpolate magnetization at integration points: (E, Q, 3)
 
-    mx, my, mz = m_ip[..., 0], m_ip[..., 1], m_ip[..., 2]
+    mx, my, mz = m_local[..., 0], m_local[..., 1], m_local[..., 2]
     eps = 1e-12
 
+    print("x" * 35)
+    # jax.debug.print("mz : {mz}", mz=mz)
+    print("x" * 35)
     # Compute sin^2(theta) and cos(2phi)
     sin_square_theta = 1.0 - mz**2
     rho = mx**2 + my**2 + eps
-    cos_tow_phi = (mx**2 - my**2) / rho
+    cos_tow_phi = (mx**2 - -(my**2)) / rho
 
     # Energy density at IP: (E, Q)
     e_ip = (
@@ -117,11 +123,12 @@ def orthorhombic_anisotropy_energy_and_grad_ip(
 
     grad_ip = jnp.stack([de_dmx, de_dmy, de_dmz], axis=-1)  # (E, Q, 3)
 
+    grad_global = jnp.einsum("eji,eqj->eqi", rotation_matrix_e, grad_ip)
     # Distribute gradients to nodes using barycentric weights
     contrib = (
         (Ve[:, None, None, None] * ip_weights[None, :, None, None])
         * ip_bary[None, :, :, None]
-        * grad_ip[:, :, None, :]
+        * grad_global[:, :, None, :]
     )  # (E, Q, 4, 3)
 
     # Sum over Q integration points
@@ -141,7 +148,7 @@ def uniaxial_anisotropy_energy_and_grad(
 ):
     K1p_lookup = jnp.array([0.091995e6, 0.0])  # Ga4Mn8
     return orthorhombic_anisotropy_energy_and_grad_ip(
-        m_nodes, geom, K1_lookup, K1p_lookup
+        m_nodes, geom, K1_lookup, K1p_lookup, k_easy_e
     )
     """
     conn, Ve, mat_id = geom.conn, geom.volume, geom.mat_id
