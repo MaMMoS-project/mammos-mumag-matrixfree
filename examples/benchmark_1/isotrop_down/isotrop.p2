@@ -9,7 +9,7 @@ mz = 1.
 [field]
 hstart = 2.
 hfinal = -2.
-hstep = 0.01
+hstep = -0.01
 
 hx = 0.
 hy = 0.
