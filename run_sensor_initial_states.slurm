@@ -42,7 +42,7 @@ echo "SIMDIR:" $SIMDIR
 # MESH_H has to match available initial state files !
 MESH_H="0.003"
 # HSTEP can be chosen freely
-HSTEP="0.0025"
+HSTEP="0.00025"
 # ============================================================================
 
 # Set variables
