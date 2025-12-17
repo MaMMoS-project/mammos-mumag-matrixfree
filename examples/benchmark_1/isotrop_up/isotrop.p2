@@ -7,8 +7,8 @@ my = 0.
 mz = 1.
 
 [field]
-hstart = 2.
-hfinal = -2.
+hstart = -2.
+hfinal = 2.
 hstep = 0.01
 
 hx = 0.
