@@ -207,6 +207,7 @@ mkdir -p $RESULT_BASE
 echo "Copying results to $RESULT_BASE..."
 cp -r ./examples/benchmark_1/results/* $RESULT_BASE/ 2>/dev/null || echo "  ⚠ No results directory found"
 cp -r ./examples/benchmark_1/isotrop_down $RESULT_BASE/ 2>/dev/null || echo "  ⚠ No isotrop_down directory found"
+cp -r ./examples/benchmark_1/isotrop_up $RESULT_BASE/ 2>/dev/null || echo "  ⚠ No isotrop_up directory found"
 cp ./examples/benchmark_1/benchmark1_workflow.py $RESULT_BASE/ 2>/dev/null || true
 
 echo "  ✓ Results copied to $RESULT_BASE"
