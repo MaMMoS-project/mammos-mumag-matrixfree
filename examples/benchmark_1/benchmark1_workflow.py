@@ -378,7 +378,9 @@ def plot_hysteresis_loop(
     output_file: Path, 
     overlay_down_files: Optional[List[Path]] = None,
     overlay_up_files: Optional[List[Path]] = None,
-    num_runs: Optional[int] = None
+    num_runs: Optional[int] = None,
+    grains: Optional[int] = None,
+    extent: Optional[str] = None,
 ) -> None:
     """Plot hysteresis loop from .dat file.
     
@@ -395,6 +397,8 @@ def plot_hysteresis_loop(
         overlay_down_files: Optional list of downward .dat files to plot (alpha=0.5, gray)
         overlay_up_files: Optional list of upward .dat files to plot (alpha=0.5, lightblue)
         num_runs: Optional number of runs used for averaging (shown in title)
+        grains: Optional grain count used for the mesh (shown in title)
+        extent: Optional extent string (Lx,Ly,Lz) used for the mesh (shown in title)
     """
     try:
         # Load data, skipping header line
@@ -506,10 +510,18 @@ def plot_hysteresis_loop(
         # Round top-axis ticks to whole numbers (kA/m) with no decimal part
         ax_top.set_xticklabels([f"{tick / mu0 / 1e3:.0f}" for tick in top_ticks])
 
-        # Build title with optional run count
-        title = "Averaged Hysteresis Loop"
+        # Build title with optional run count, grains, and extent
+        title_parts = []
         if num_runs is not None and num_runs > 0:
-            title += f" (n={num_runs} runs)"
+            title_parts.append(f"n={num_runs} runs")
+        if grains is not None and grains > 0:
+            title_parts.append(f"grains={grains}")
+        if extent:
+            extent_label = extent.replace(",", "x")
+            title_parts.append(f"extent={extent_label} nm^3")
+
+        title_suffix = f" ({', '.join(title_parts)})" if title_parts else ""
+        title = f"Averaged Hysteresis Loop{title_suffix}"
         ax_left.set_title(title, fontsize=12, fontweight="bold")
         ax_left.legend(loc="best", fontsize=10)
         fig.tight_layout()
@@ -916,10 +928,17 @@ def step4_repeat_and_average(
         print(f"\n[B.7] GENERATING PLOT")
         plot_file = results_dir / "isotrop_average.png"
         total_runs = len(dat_files_down) + len(dat_files_up)
-        plot_hysteresis_loop(avg_file, plot_file, 
-                           overlay_down_files=dat_files_down,
-                           overlay_up_files=dat_files_up,
-                           num_runs=total_runs)
+        mesh_grains = grains_override if grains_override is not None else 8
+        mesh_extent = extent_override if extent_override else ("20,20,20" if neper_minimal else "80,80,80")
+        plot_hysteresis_loop(
+            avg_file,
+            plot_file,
+            overlay_down_files=dat_files_down,
+            overlay_up_files=dat_files_up,
+            num_runs=total_runs,
+            grains=mesh_grains,
+            extent=mesh_extent,
+        )
         
         # Summary
         print("\n" + "=" * 80)
