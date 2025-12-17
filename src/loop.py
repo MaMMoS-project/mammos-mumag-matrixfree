@@ -84,6 +84,7 @@ class MaterialsPack:
     A_lookup_exchange: jnp.ndarray
     K1_lookup: jnp.ndarray
     k_easy_e: jnp.ndarray
+    K_1p_lookup: Optional[jnp.ndarray] = None
 
 
 @dataclass
@@ -269,7 +270,6 @@ def step4_read_materials(
     # theta (rad)   phi (rad)   K1(J/m3)   not used   Js (T)   A (J/m)
     # Entries for a krn file with orthohombic anisotropy
     # a (rad)   b (rad)  c (rad) K1(J/m3)   K1'(J/m3)  Js (T)   A (J/m)
-    print("x" * 35)
 
     intrinsic_properties: list[list[float]] = []
     with open(krn_file, "r", newline="") as f:
@@ -282,9 +282,6 @@ def step4_read_materials(
             if row[0].startswith("#"):
                 continue
             intrinsic_properties.append(list(map(float, row)))
-
-    print(f"[debug] Read {len(intrinsic_properties)} .krn data lines")
-    print(intrinsic_properties)
 
     if not intrinsic_properties:
         raise ValueError(".krn has no valid data lines")
@@ -312,7 +309,6 @@ def step4_read_materials(
     intrinsic_properties_T: list[list[float]] = [
         list(col) for col in zip(*intrinsic_properties)
     ]
-    print(intrinsic_properties_T)
     if nr_of_props == 6:
         theta, phi, K_1, _, J_s, A_ex = intrinsic_properties_T
         # Vectorized elementwise computation for all theta/phi entries
@@ -327,11 +323,22 @@ def step4_read_materials(
             axis=1,
         )
         #! Somebody who knows, is this really necessary?
+        #! A zero rotation matrix? for air
         easy_axis_per_group = easy_axis_per_group.at[-1].set(
             jnp.zeros(3, dtype=easy_axis_per_group.dtype)
         )
+        K_1p_per_group = None
     elif nr_of_props == 7:
-        theta, phi, _, K_1, K_1p, J_s, A_ex = intrinsic_properties_T
+        alpha, beta, gamma, K_1, K_1p, J_s, A_ex = intrinsic_properties_T
+        K_1p_per_group = jnp.asarray(K_1p, dtype=jnp.float64)
+        easy_axis_per_group = jnp.stack(
+            [
+                jnp.asarray(alpha, dtype=jnp.float64),
+                jnp.asarray(beta, dtype=jnp.float64),
+                jnp.asarray(gamma, dtype=jnp.float64),
+            ],
+            axis=1,
+        )
     else:
         raise NotImplementedError(
             f".krn with {len(intrinsic_properties_T)} properties per line not supported"
@@ -344,7 +351,15 @@ def step4_read_materials(
 
     k_easy_e = easy_axis_per_group[geom.mat_id - 1]
 
-    return MaterialsPack(M_s_per_group, A_ex_per_group, K_1_per_group, k_easy_e)
+    print(easy_axis_per_group)
+
+    return MaterialsPack(
+        M_s_per_group,
+        A_ex_per_group,
+        K_1_per_group,
+        k_easy_e,
+        K_1p_lookup=K_1p_per_group,
+    )
 
 
 # ----------------------------- Step 5/6 helpers ------------------------------
