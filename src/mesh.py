@@ -1345,10 +1345,12 @@ def run_single_solid_mesher(
 def find_gmsh_path() -> str | None:
     """
     Attempt to locate the gmsh executable on PATH.
-    Returns the full path to gmsh if found, None otherwise.
+    Returns the directory path to gmsh if found, None otherwise.
     """
-    return shutil.which("gmsh")
-
+    gmsh_full = shutil.which("gmsh")
+    if gmsh_full:
+        return os.path.dirname(gmsh_full)
+    return None
 
 def mesh_backend_neper_poly(n: int, seed: int, size_x: float, size_y: float, size_z: float, h: float):
     import subprocess, sys
@@ -1369,7 +1371,8 @@ def mesh_backend_neper_poly(n: int, seed: int, size_x: float, size_y: float, siz
     gmsh_path = find_gmsh_path()
     if gmsh_path:
         # Pass the full path to gmsh; Neper requires a valid filesystem path
-        cmd_mesh.extend(["-gmsh", gmsh_path])
+        print("extend no more needed")
+        # cmd_mesh.extend(["-gmsh", gmsh_path])
     else:
         print(
             "[warn] gmsh executable not found on PATH; Neper meshing may fail. "
