@@ -31,6 +31,7 @@ from optimize import (
     precompute_diag_tangent_from_geom,
     precompute_block_jacobi_3x3_from_geom,
 )
+from rotation import get_rot_matix
 
 
 # ------------------------------- Dataclasses ---------------------------------
@@ -309,6 +310,7 @@ def step4_read_materials(
     intrinsic_properties_T: list[list[float]] = [
         list(col) for col in zip(*intrinsic_properties)
     ]
+    # Case for uniaxial anisotropy
     if nr_of_props == 6:
         theta, phi, K_1, _, J_s, A_ex = intrinsic_properties_T
         # Vectorized elementwise computation for all theta/phi entries
@@ -328,10 +330,11 @@ def step4_read_materials(
             jnp.zeros(3, dtype=easy_axis_per_group.dtype)
         )
         K_1p_per_group = None
+    # Case for orthohombic anisotropy
     elif nr_of_props == 7:
         alpha, beta, gamma, K_1, K_1p, J_s, A_ex = intrinsic_properties_T
         K_1p_per_group = jnp.asarray(K_1p, dtype=jnp.float64)
-        easy_axis_per_group = jnp.stack(
+        euler_angles_per_group = jnp.stack(
             [
                 jnp.asarray(alpha, dtype=jnp.float64),
                 jnp.asarray(beta, dtype=jnp.float64),
@@ -339,6 +342,8 @@ def step4_read_materials(
             ],
             axis=1,
         )
+        easy_axis_per_group = jax.vmap(get_rot_matix)(euler_angles_per_group)
+
     else:
         raise NotImplementedError(
             f".krn with {len(intrinsic_properties_T)} properties per line not supported"
@@ -350,8 +355,6 @@ def step4_read_materials(
     K_1_per_group = jnp.asarray(K_1, dtype=jnp.float64)
 
     k_easy_e = easy_axis_per_group[geom.mat_id - 1]
-
-    print(easy_axis_per_group)
 
     return MaterialsPack(
         M_s_per_group,
