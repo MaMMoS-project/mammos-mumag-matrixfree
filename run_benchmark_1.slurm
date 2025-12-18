@@ -50,7 +50,7 @@ NUM_REPEATS="3"        # Number of workflow iterations for averaging (default: 1
 
 # Tag for result collection directory (UTC timestamp + slurm id + parameters)
 RESULT_TAG=$(date -u +"%Y%m%dT%H%M%SZ")_slurm_${SLURM_JOB_ID}_grains${GRAINS}_repeats${NUM_REPEATS}
-RESULT_BASE=$SLURM_SUBMIT_DIR/examples/benchmark_1/$RESULT_TAG
+RESULT_BASE=$SLURM_SUBMIT_DIR/examples/benchmark_1/results/$RESULT_TAG
 # ============================================================================
 
 # Set environment variables
