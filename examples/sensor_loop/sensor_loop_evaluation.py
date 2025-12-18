@@ -693,21 +693,21 @@ def main() -> int:
         description="Sensor loop evaluation and plotting tool for MaMMoS D6.2 benchmarks",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Run full evaluation on cases a, b, c
-  %(prog)s
-  
-  # Run only cases a and c (skip case b)
-  %(prog)s --cases a c
-  
-  # Plot easy-axis hysteresis from custom file
-  %(prog)s --plot-a /path/to/data.dat --output-dir ./plots
-  
-  # Plot 45-degree hysteresis with custom field range
-  %(prog)s --plot-b data.dat --xlim -10 10
-  
-  # Plot hard-axis hysteresis with sensitivity analysis
-  %(prog)s --plot-c data.dat --output-dir ./plots
+Examples (run from a dated result folder or repo root):
+    # The results files "sensor.dat" are expected in subfoldes such as 'sensor_case-a_down'
+    # Full pipeline: auto-concatenate (down+up) and plot all cases
+    %(prog)s --sensor-loop-dir .
+
+    # Standalone plot for case a (expects sensor_case-a.dat already concatenated)
+    %(prog)s --plot-a sensor_case-a.dat --output-dir ./plots
+
+    # Standalone plot for case b (expects sensor_case-b.dat already concatenated)
+    %(prog)s --plot-b sensor_case-b.dat --output-dir ./plots --xlim -10 10
+
+    # Standalone plot for case c (expects sensor_case-c.dat already concatenated)
+    %(prog)s --plot-c sensor_case-c.dat --output-dir ./plots
+
+Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
         """,
     )
     parser.add_argument(
@@ -778,6 +778,12 @@ Examples:
         metavar="STRING",
         help="Extra information string to log at the beginning of the log file",
     )
+    parser.add_argument(
+        "--sensor-loop-dir",
+        type=Path,
+        metavar="DIR",
+        help="Override auto-discovery and use this directory as examples/sensor_loop",
+    )
     
     args = parser.parse_args()
 
@@ -814,7 +820,7 @@ Examples:
         logger.info(f"[OUTPUT] Directory: {output_dir}")
         logger.info(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
         logger.info(f"[PLOT]   Figure name: {args.figure_name}")
-        logger.info()
+        logger.info("")
         
         # Extract parameters if requested
         filename_suffix = ""
@@ -842,7 +848,7 @@ Examples:
             filename_suffix=filename_suffix,
         )
         
-        logger.info()
+        logger.info("")
         logger.info("=" * 80)
         logger.info(f"[LOG]    Log saved to: {log_file}")
         logger.info("=" * 80)
@@ -881,7 +887,7 @@ Examples:
         logger.info(f"[OUTPUT] Directory: {output_dir}")
         logger.info(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
         logger.info(f"[PLOT]   Figure name: {args.figure_name}")
-        logger.info()
+        logger.info("")
         
         # Extract parameters if requested
         filename_suffix = ""
@@ -909,7 +915,7 @@ Examples:
             filename_suffix=filename_suffix,
         )
         
-        logger.info()
+        logger.info("")
         logger.info("=" * 80)
         logger.info("PLOTTING COMPLETED")
         logger.info("=" * 80)
@@ -953,7 +959,7 @@ Examples:
         logger.info(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
         logger.info(f"[PLOT]   Figure name: {args.figure_name}")
         logger.info(f"[PLOT]   Fit window: ±{window_half_width} kA/m")
-        logger.info()
+        logger.info("")
         
         # Extract parameters if requested
         filename_suffix = ""
@@ -982,7 +988,7 @@ Examples:
             filename_suffix=filename_suffix,
         )
         
-        logger.info()
+        logger.info("")
         logger.info("=" * 80)
         logger.info("PLOTTING COMPLETED")
         logger.info("=" * 80)
@@ -1010,10 +1016,65 @@ Examples:
     # END OF USER CONFIGURATION
     # =====================================================================
 
-    # Initialize logging
+    # Resolve runtime paths robustly so the script works even if copied
+    # into nested folders (e.g., timestamped subdirectories inside sensor_loop/).
     run_dir = Path(__file__).resolve().parent
-    base = run_dir.parent.parent.resolve()
     log_dir = run_dir
+
+    examples_dir: Path | None = None
+    sensor_loop_dir: Path | None = None
+    repo_root: Path | None = None
+
+    # 1) Explicit override via CLI
+    if args.sensor_loop_dir is not None:
+        candidate = args.sensor_loop_dir.resolve()
+        if not candidate.is_dir():
+            print(f"[ERROR] --sensor-loop-dir does not exist or is not a directory: {candidate}", file=sys.stderr)
+            return 1
+        sensor_loop_dir = candidate
+        examples_dir = candidate.parent
+        repo_root = examples_dir.parent
+    else:
+        # 2) Auto-discovery by walking up parents
+        for p in [run_dir] + list(run_dir.parents):
+            # Case 1: We are inside examples/sensor_loop or below it
+            if p.name == "sensor_loop" and p.is_dir():
+                sensor_loop_dir = p
+                examples_dir = p.parent
+                repo_root = examples_dir.parent
+                break
+            # Case 2: Current ancestor is examples/, and it contains sensor_loop/
+            if (p / "sensor_loop").is_dir():
+                examples_dir = p
+                sensor_loop_dir = p / "sensor_loop"
+                repo_root = examples_dir.parent
+                break
+            # Case 3: Current ancestor looks like the repo root containing examples/sensor_loop
+            if (p / "examples" / "sensor_loop").is_dir():
+                repo_root = p
+                examples_dir = p / "examples"
+                sensor_loop_dir = examples_dir / "sensor_loop"
+                break
+
+        # 3) Last-resort fallback: assume current directory is the sensor_loop directory
+        if sensor_loop_dir is None:
+            if (run_dir / "sensor_case-a_down").exists() or (run_dir / "sensor_case-a_up").exists():
+                sensor_loop_dir = run_dir
+                examples_dir = run_dir.parent
+                repo_root = examples_dir.parent
+            else:
+                # No logging set up yet; print a clear error to stderr and exit
+                print(
+                    f"[ERROR] Could not locate 'sensor_loop' directory starting from: {run_dir}",
+                    file=sys.stderr,
+                )
+                print(
+                    "        Use --sensor-loop-dir to specify the path explicitly, or run this script from within the repository or a subfolder of examples/sensor_loop/",
+                    file=sys.stderr,
+                )
+                return 1
+
+    # Initialize logging after paths are resolved
     logger, log_file = setup_logging(log_dir)
 
     logger.info("=" * 80)
@@ -1024,12 +1085,10 @@ Examples:
     if args.info:
         logger.info(f"\n[INFO] {args.info}\n")
 
-    # Resolve paths relative to this script to allow running from anywhere
-    examples_dir = base.joinpath("examples")
-    sensor_loop_dir = examples_dir.joinpath("sensor_loop")
-
+    # Path info logging
+    base_dir_to_show = repo_root if repo_root is not None else (examples_dir.parent if examples_dir else run_dir)
     logger.info("[PATH INFO]")
-    logger.info(f"  Base directory:        {base}")
+    logger.info(f"  Base directory:        {base_dir_to_show}")
     logger.info(f"  Examples directory:    {examples_dir}")
     logger.info(f"  Sensor loop directory: {sensor_loop_dir}")
 
