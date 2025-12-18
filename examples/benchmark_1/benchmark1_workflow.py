@@ -519,24 +519,32 @@ def plot_hysteresis_loop(
         ax_left.set_xlabel("Applied Field µ0 Hext (T)", fontsize=11)
         ax_left.set_ylabel("Magnetization M (kA/m)", fontsize=11)
         ax_left.grid(True, alpha=0.3)
+        ax_left.set_xlim(-2.0, 2.0)
 
         # Secondary y-axis: J in Tesla
         ax_right = ax_left.twinx()
-        ax_right.set_ylabel("Magnetization J (T)", fontsize=11)
-        ax_right.set_ylim(ax_left.get_ylim())
-        # Map kA/m ticks back to Tesla using mu0
-        left_ticks = ax_left.get_yticks()
-        ax_right.set_yticks(left_ticks)
-        ax_right.set_yticklabels([f"{tick * mu0 * 1e3:.2f}" for tick in left_ticks])
-
-        # Secondary x-axis: Hext in kA/m (converted from bottom Tesla)
-        ax_top = ax_left.twiny()
-        ax_top.set_xlabel("Applied Field Hext (kA/m)", fontsize=11)
-        top_ticks = ax_left.get_xticks()
-        ax_top.set_xticks(top_ticks)
-        ax_top.set_xlim(ax_left.get_xlim())
-        # Round top-axis ticks to whole numbers (kA/m) with no decimal part
-        ax_top.set_xticklabels([f"{tick / mu0 / 1e3:.0f}" for tick in top_ticks])
+        ax_right.set_ylabel("Magnetization µ0 M (T)", fontsize=11)
+        ylim_left = ax_left.get_ylim()
+        print(f"[DEBUG] Left y-limits: {ylim_left}")
+        yticks_left = ax_left.get_yticks()
+        print(f"[DEBUG] Left y-ticks: {yticks_left}")
+        ylim_right = (ylim_left[0] * mu0 * 1e3, ylim_left[1] * mu0 * 1e3)
+        print(f"[DEBUG] Right y-limits: {ylim_right}")
+        ytick_right = yticks_left * mu0 * 1e3
+        print(f"[DEBUG] Right y-ticks: {ytick_right}")
+        ax_right.set_yticks(ytick_right)
+        ax_right.set_ylim(ylim_right[0], ylim_right[1])
+        
+        # # Position x-axis of ax_right on top and configure for Hext in kA/m
+        # ax_right.xaxis.tick_top()
+        # ax_right.xaxis.set_ticks_position('top')
+        # ax_right.xaxis.set_label_position('top')
+        # ax_right.set_xlabel("Applied Field Hext (kA/m)", fontsize=11)
+        # top_ticks = ax_left.get_xticks()
+        # ax_right.set_xticks(top_ticks)
+        # ax_right.set_xlim(ax_left.get_xlim())
+        # # Round top-axis ticks to whole numbers (kA/m) with no decimal part
+        # ax_right.set_xticklabels([f"{tick / mu0 / 1e3:.0f}" for tick in top_ticks])
 
         # Build title with optional run count, grains, and extent
         title_parts = []
