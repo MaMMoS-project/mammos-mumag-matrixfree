@@ -381,6 +381,8 @@ def plot_hysteresis_loop(
     num_runs: Optional[int] = None,
     grains: Optional[int] = None,
     extent: Optional[str] = None,
+    num_down: Optional[int] = None,
+    num_up: Optional[int] = None,
 ) -> None:
     """Plot hysteresis loop from .dat file.
     
@@ -399,6 +401,8 @@ def plot_hysteresis_loop(
         num_runs: Optional number of runs used for averaging (shown in title)
         grains: Optional grain count used for the mesh (shown in title)
         extent: Optional extent string (Lx,Ly,Lz) used for the mesh (shown in title)
+        num_down: Optional number of downward runs (shown in legend)
+        num_up: Optional number of upward runs (shown in legend)
     """
     try:
         # Load data, skipping header line
@@ -412,47 +416,58 @@ def plot_hysteresis_loop(
         J_h_T = data[:, 2]  # Magnetization response [T]
         
         # Convert to physical units
-        Hext_kA_per_m = Hext_T / mu0 / 1e3  # External field [kA/m]
         M_kA_per_m = J_h_T / mu0 / 1e3  # Magnetization [kA/m]
         
         # Create plot with secondary axes (bottom: Tesla, top: kA/m)
         fig, ax_left = plt.subplots(figsize=(10, 6))
 
-        # Optional overlays for downward runs (gray)
+        # Track plot handles and labels for separate legends
+        individual_handles = []
+        individual_labels = []
+        averaged_handles = []
+        averaged_labels = []
+
+        # Optional overlays for downward runs (transparent blue)
         if overlay_down_files:
-            for ofile in overlay_down_files:
+            for idx, ofile in enumerate(overlay_down_files):
                 try:
                     odata = np.loadtxt(ofile, skiprows=1)
                     oHext_T = odata[:, 1]
                     oJ_h_T = odata[:, 2]
                     oM_kA_per_m = oJ_h_T / mu0 / 1e3
-                    ax_left.plot(
+                    line, = ax_left.plot(
                         oHext_T,
                         oM_kA_per_m,
-                        color="gray",
-                        alpha=0.5,
+                        color="C0",
+                        alpha=0.25,
+                        linestyle="--",
                         linewidth=1.0,
-                        label=None,
                     )
+                    if idx == 0:
+                        individual_handles.append(line)
+                        individual_labels.append("Individual down-ward runs")
                 except Exception as overlay_err:
                     print(f"[WARNING] Could not overlay {ofile}: {overlay_err}", file=sys.stderr)
         
-        # Optional overlays for upward runs (orange for contrast)
+        # Optional overlays for upward runs (transparent orange)
         if overlay_up_files:
-            for ofile in overlay_up_files:
+            for idx, ofile in enumerate(overlay_up_files):
                 try:
                     odata = np.loadtxt(ofile, skiprows=1)
                     oHext_T = odata[:, 1]
                     oJ_h_T = odata[:, 2]
                     oM_kA_per_m = oJ_h_T / mu0 / 1e3
-                    ax_left.plot(
+                    line, = ax_left.plot(
                         oHext_T,
                         oM_kA_per_m,
-                        color="orange",
-                        alpha=0.5,
+                        color="C3",
+                        alpha=0.25,
+                        linestyle="--",
                         linewidth=1.0,
-                        label=None,
                     )
+                    if idx == 0:
+                        individual_handles.append(line)
+                        individual_labels.append("Individual up-ward runs")
                 except Exception as overlay_err:
                     print(f"[WARNING] Could not overlay {ofile}: {overlay_err}", file=sys.stderr)
 
@@ -468,26 +483,39 @@ def plot_hysteresis_loop(
             has_down = has_up = False
 
         if has_down and has_up:
+            # Build legend labels with optional run counts
+            down_label = "Average down-ward path of hysteresis loop"
+            if num_down is not None and num_down > 0:
+                down_label += f" (n={num_down})"
+            up_label = "Average up-ward path of hysteresis loop"
+            if num_up is not None and num_up > 0:
+                up_label += f" (n={num_up})"
+            
             # Downward averaged segment: start -> min(H)
-            ax_left.plot(
+            line_down, = ax_left.plot(
                 Hext_T[: idx_min + 1],
                 M_kA_per_m[: idx_min + 1],
                 color="C0",
                 linewidth=1.5,
-                label="Average down-ward path of hysteresis loop",
             )
+            averaged_handles.append(line_down)
+            averaged_labels.append(down_label)
+            
             # Upward averaged segment: min(H) -> end
-            ax_left.plot(
+            line_up, = ax_left.plot(
                 Hext_T[idx_min :],
                 M_kA_per_m[idx_min :],
                 color="C3",
                 linewidth=1.5,
-                label="Average up-ward path of hysteresis loop",
             )
+            averaged_handles.append(line_up)
+            averaged_labels.append(up_label)
         else:
             # Fallback: single averaged curve
-            ax_left.plot(Hext_T, M_kA_per_m, "C0-", linewidth=1.5, label="Hysteresis loop")
-            ax_left.plot(Hext_T, M_kA_per_m, "C0+", markersize=4, alpha=0.6, label="Data points")
+            line1, = ax_left.plot(Hext_T, M_kA_per_m, "C0-", linewidth=1.5)
+            line2, = ax_left.plot(Hext_T, M_kA_per_m, "C0+", markersize=4, alpha=0.6)
+            averaged_handles.extend([line1, line2])
+            averaged_labels.extend(["Hysteresis loop", "Data points"])
         ax_left.set_xlabel("Applied Field µ0 Hext (T)", fontsize=11)
         ax_left.set_ylabel("Magnetization M (kA/m)", fontsize=11)
         ax_left.grid(True, alpha=0.3)
@@ -512,8 +540,6 @@ def plot_hysteresis_loop(
 
         # Build title with optional run count, grains, and extent
         title_parts = []
-        if num_runs is not None and num_runs > 0:
-            title_parts.append(f"n={num_runs} runs")
         if grains is not None and grains > 0:
             title_parts.append(f"grains={grains}")
         if extent:
@@ -523,7 +549,15 @@ def plot_hysteresis_loop(
         title_suffix = f" ({', '.join(title_parts)})" if title_parts else ""
         title = f"Averaged Hysteresis Loop{title_suffix}"
         ax_left.set_title(title, fontsize=12, fontweight="bold")
-        ax_left.legend(loc="best", fontsize=10)
+        
+        # Create two separate legends: one for averaged curves (top left), one for individual runs (bottom right)
+        if averaged_handles:
+            legend1 = ax_left.legend(averaged_handles, averaged_labels, loc="upper left", fontsize=10, framealpha=0.9)
+            ax_left.add_artist(legend1)  # Add first legend back to plot
+        
+        if individual_handles:
+            ax_left.legend(individual_handles, individual_labels, loc="lower right", fontsize=10, framealpha=0.9)
+        
         fig.tight_layout()
         
         # Save plot
@@ -927,16 +961,26 @@ def step4_repeat_and_average(
         # Generate plot for averaged data with both directions
         print(f"\n[B.7] GENERATING PLOT")
         plot_file = results_dir / "isotrop_average.png"
-        mesh_grains = grains_override if grains_override is not None else 8
-        mesh_extent = extent_override if extent_override else ("20,20,20" if neper_minimal else "80,80,80")
+        total_runs = len(dat_files_down) + len(dat_files_up) / 2
+        
+        # In average-only mode, only include grains/extent in title if explicitly specified by user
+        if average_only:
+            mesh_grains = grains_override  # None if not specified
+            mesh_extent = extent_override  # None if not specified
+        else:
+            mesh_grains = grains_override if grains_override is not None else 8
+            mesh_extent = extent_override if extent_override else ("20,20,20" if neper_minimal else "80,80,80")
+        
         plot_hysteresis_loop(
             avg_file,
             plot_file,
             overlay_down_files=dat_files_down,
             overlay_up_files=dat_files_up,
-            num_runs=num_repeats,
+            num_runs=total_runs,
             grains=mesh_grains,
             extent=mesh_extent,
+            num_down=len(dat_files_down),
+            num_up=len(dat_files_up),
         )
         
         # Summary
