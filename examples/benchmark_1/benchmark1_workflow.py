@@ -519,46 +519,52 @@ def plot_hysteresis_loop(
         ax_left.set_xlabel("Applied Field µ0 Hext (T)", fontsize=11)
         ax_left.set_ylabel("Magnetization M (kA/m)", fontsize=11)
         ax_left.grid(True, alpha=0.3)
-        ax_left.set_xlim(-2.0, 2.0)
+        ax_left.set_xlim(-2, 2.0)
 
         # ===== SECONDARY AXES FOR UNIT CONVERSION =====
         # We use secondary_yaxis() and secondary_xaxis() to create linked axes that:
         # 1. Stay synchronized with the primary axes (automatic rescaling/panning)
         # 2. Allow displaying the same physical data in different units
-        # 3. Maintain consistency in the plotting approach for both x and y
+        # 3. Use transformation functions for automatic tick label conversion
         #
         # Alternative approach (twinx/twiny) creates independent axes with separate scales,
         # which would require manual synchronization and is not needed here since we're
         # just converting units, not plotting different datasets.
         
-        # RIGHT Y-AXIS: Convert magnetization from M (kA/m) to µ0*M (Tesla)
+        # Define conversion functions for magnetization: M (kA/m) ↔ J (T)
         # Physical relationship: Magnetic polarization J = µ0 * M
         # where µ0 = 4π×10⁻⁷ T·m/A is the permeability of free space
-        ax_right = ax_left.secondary_yaxis('right')
-        ax_right.set_ylabel("Magnetization µ0 M (T)", fontsize=11)
+        def M_to_J(M_kA_per_m):
+            """Convert magnetization from kA/m to Tesla (J = µ0 * M)"""
+            return M_kA_per_m * mu0 * 1e3
         
-        # Manual tick label conversion is needed because we're converting between
-        # different physical units (kA/m → T), not just rescaling by a constant factor.
-        # We read the left axis tick positions (in kA/m) and display them as Tesla on the right.
-        yticks_left = ax_left.get_yticks()
-        ax_right.set_yticks(yticks_left)
-        ax_right.set_yticklabels([f"{tick * mu0 * 1e3:.2f}" for tick in yticks_left])
+        def J_to_M(J_T):
+            """Convert magnetization from Tesla to kA/m (M = J / µ0)"""
+            return J_T / (mu0 * 1e3)
         
-        # TOP X-AXIS: Convert applied field from µ0*Hext (Tesla) to Hext (kA/m)
+        # Define conversion functions for applied field: µ0*Hext (T) ↔ Hext (kA/m)
         # Physical relationship: µ0*H is the magnetic flux density in Tesla
-        # We invert the relationship: H (kA/m) = (µ0*H in Tesla) / (µ0 × 10³)
-        x_top = ax_left.secondary_xaxis('top')
+        def H_T_to_kA_per_m(H_T):
+            """Convert applied field from Tesla to kA/m"""
+            return H_T / (mu0 * 1e3)
+        
+        def H_kA_per_m_to_T(H_kA_per_m):
+            """Convert applied field from kA/m to Tesla"""
+            return H_kA_per_m * mu0 * 1e3
+        
+        # RIGHT Y-AXIS: Magnetization in Tesla using transformation functions
+        ax_right = ax_left.secondary_yaxis('right', functions=(M_to_J, J_to_M))
+        ax_right.set_ylabel("Magnetization µ0 M (T)", fontsize=11)
+        yticks_left = ax_left.get_yticks()
+        yticks_right = M_to_J(yticks_left)
+        ax_right.set_yticks(yticks_right, labels=[f"{y:.3f}" for y in yticks_right])
+        
+        # TOP X-AXIS: Applied field in kA/m using transformation functions
+        x_top = ax_left.secondary_xaxis('top', functions=(H_T_to_kA_per_m, H_kA_per_m_to_T))
         x_top.set_xlabel("Applied Field Hext (kA/m)", fontsize=11)
-        
-        # Same manual conversion pattern: read bottom axis ticks (Tesla) and
-        # display them as kA/m on the top. Integer formatting (.0f) because
-        # field values in kA/m are typically whole numbers in this range.
-        top_ticks = ax_left.get_xticks()
-        x_top.set_xticks(top_ticks)
-        x_top.set_xticklabels([f"{tick / mu0 / 1e3:.0f}" for tick in top_ticks])
-        x_top.set_xlim(ax_left.get_xlim())
-
-        
+        xticks_bottom = ax_left.get_xticks()
+        xticks_top = H_T_to_kA_per_m(xticks_bottom)
+        x_top.set_xticks(xticks_top, labels=[f"{x:.0f}" for x in xticks_top])        
         
         
         # Build title with optional run count, grains, and extent
