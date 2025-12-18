@@ -521,31 +521,46 @@ def plot_hysteresis_loop(
         ax_left.grid(True, alpha=0.3)
         ax_left.set_xlim(-2.0, 2.0)
 
-        # Secondary y-axis: J in Tesla
-        ax_right = ax_left.twinx()
-        ax_right.set_ylabel("Magnetization µ0 M (T)", fontsize=11)
-        ylim_left = ax_left.get_ylim()
-        print(f"[DEBUG] Left y-limits: {ylim_left}")
-        yticks_left = ax_left.get_yticks()
-        print(f"[DEBUG] Left y-ticks: {yticks_left}")
-        ylim_right = (ylim_left[0] * mu0 * 1e3, ylim_left[1] * mu0 * 1e3)
-        print(f"[DEBUG] Right y-limits: {ylim_right}")
-        ytick_right = yticks_left * mu0 * 1e3
-        print(f"[DEBUG] Right y-ticks: {ytick_right}")
-        ax_right.set_yticks(ytick_right)
-        ax_right.set_ylim(ylim_right[0], ylim_right[1])
+        # ===== SECONDARY AXES FOR UNIT CONVERSION =====
+        # We use secondary_yaxis() and secondary_xaxis() to create linked axes that:
+        # 1. Stay synchronized with the primary axes (automatic rescaling/panning)
+        # 2. Allow displaying the same physical data in different units
+        # 3. Maintain consistency in the plotting approach for both x and y
+        #
+        # Alternative approach (twinx/twiny) creates independent axes with separate scales,
+        # which would require manual synchronization and is not needed here since we're
+        # just converting units, not plotting different datasets.
         
-        # # Position x-axis of ax_right on top and configure for Hext in kA/m
-        # ax_right.xaxis.tick_top()
-        # ax_right.xaxis.set_ticks_position('top')
-        # ax_right.xaxis.set_label_position('top')
-        # ax_right.set_xlabel("Applied Field Hext (kA/m)", fontsize=11)
-        # top_ticks = ax_left.get_xticks()
-        # ax_right.set_xticks(top_ticks)
-        # ax_right.set_xlim(ax_left.get_xlim())
-        # # Round top-axis ticks to whole numbers (kA/m) with no decimal part
-        # ax_right.set_xticklabels([f"{tick / mu0 / 1e3:.0f}" for tick in top_ticks])
+        # RIGHT Y-AXIS: Convert magnetization from M (kA/m) to µ0*M (Tesla)
+        # Physical relationship: Magnetic polarization J = µ0 * M
+        # where µ0 = 4π×10⁻⁷ T·m/A is the permeability of free space
+        ax_right = ax_left.secondary_yaxis('right')
+        ax_right.set_ylabel("Magnetization µ0 M (T)", fontsize=11)
+        
+        # Manual tick label conversion is needed because we're converting between
+        # different physical units (kA/m → T), not just rescaling by a constant factor.
+        # We read the left axis tick positions (in kA/m) and display them as Tesla on the right.
+        yticks_left = ax_left.get_yticks()
+        ax_right.set_yticks(yticks_left)
+        ax_right.set_yticklabels([f"{tick * mu0 * 1e3:.2f}" for tick in yticks_left])
+        
+        # TOP X-AXIS: Convert applied field from µ0*Hext (Tesla) to Hext (kA/m)
+        # Physical relationship: µ0*H is the magnetic flux density in Tesla
+        # We invert the relationship: H (kA/m) = (µ0*H in Tesla) / (µ0 × 10³)
+        x_top = ax_left.secondary_xaxis('top')
+        x_top.set_xlabel("Applied Field Hext (kA/m)", fontsize=11)
+        
+        # Same manual conversion pattern: read bottom axis ticks (Tesla) and
+        # display them as kA/m on the top. Integer formatting (.0f) because
+        # field values in kA/m are typically whole numbers in this range.
+        top_ticks = ax_left.get_xticks()
+        x_top.set_xticks(top_ticks)
+        x_top.set_xticklabels([f"{tick / mu0 / 1e3:.0f}" for tick in top_ticks])
+        x_top.set_xlim(ax_left.get_xlim())
 
+        
+        
+        
         # Build title with optional run count, grains, and extent
         title_parts = []
         if grains is not None and grains > 0:
