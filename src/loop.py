@@ -959,6 +959,7 @@ def step7_demag_sweep(
 
     # Diagonal / block-Jacobi seeds use CLI damping
     if h0_mode == "diag":
+        #! No rotation therefore anisotropy K_1 stayed without, K_1p
         diag_u = precompute_diag_tangent_from_geom(
             geom,
             A_lookup_exchange=materials.A_lookup_exchange,
@@ -967,6 +968,7 @@ def step7_demag_sweep(
             mu=float(h0_damping),
         )
     elif h0_mode == "block_jacobi":
+        #! Rotation therefore anisotropy term was excluded
         diag_u = precompute_block_jacobi_3x3_from_geom(
             geom,
             A_lookup_exchange=materials.A_lookup_exchange,
