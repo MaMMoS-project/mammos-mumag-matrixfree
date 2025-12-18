@@ -32,21 +32,21 @@ echo "SIMDIR:" $SIMDIR
 # BENCHMARK 1 PARAMETERS
 # ============================================================================
 # Mesh configuration
-GRAINS="8"              # Number of grains (default: 8)
-EXTENT="80,80,80"               # Custom extent "Lx,Ly,Lz" or empty for default
-USE_MINIMAL=false       # Set to true for minimal extent (20x20x20), false for full (80x80x80)
-TOL="0.01"              # Tolerance for make_krn.py (default: 0.01)
-
-# GRAINS="4"              # Number of grains (default: 8)
+# GRAINS="8"              # Number of grains (default: 8)
 # EXTENT="80,80,80"               # Custom extent "Lx,Ly,Lz" or empty for default
-# USE_MINIMAL=true       # Set to true for minimal extent (20x20x20), false for full (80x80x80)
-# TOL="0.05"              # Tolerance for make_krn.py (default: 0.01)
+# USE_MINIMAL=false       # Set to true for minimal extent (20x20x20), false for full (80x80x80)
+# TOL="0.01"              # Tolerance for make_krn.py (default: 0.01)
+
+GRAINS="4"              # Number of grains (default: 8)
+EXTENT="30,30,30"               # Custom extent "Lx,Ly,Lz" or empty for default
+USE_MINIMAL=true       # Set to true for minimal extent (20x20x20), false for full (80x80x80)
+TOL="0.05"              # Tolerance for make_krn.py (default: 0.01)
 
                         # With <=5 grains use >=0.05; avoid >0.2
 
 # Workflow parameters
-# NUM_REPEATS="3"        # Number of workflow iterations for averaging (default: 1)
-NUM_REPEATS="10"        # Number of workflow iterations for averaging (default: 1)
+NUM_REPEATS="3"        # Number of workflow iterations for averaging (default: 1)
+# NUM_REPEATS="10"        # Number of workflow iterations for averaging (default: 1)
 
 # Tag for result collection directory (UTC timestamp + slurm id + parameters)
 RESULT_TAG=$(date -u +"%Y%m%dT%H%M%SZ")_slurm_${SLURM_JOB_ID}_grains${GRAINS}_repeats${NUM_REPEATS}
