@@ -927,7 +927,6 @@ def step4_repeat_and_average(
         # Generate plot for averaged data with both directions
         print(f"\n[B.7] GENERATING PLOT")
         plot_file = results_dir / "isotrop_average.png"
-        total_runs = len(dat_files_down) + len(dat_files_up)
         mesh_grains = grains_override if grains_override is not None else 8
         mesh_extent = extent_override if extent_override else ("20,20,20" if neper_minimal else "80,80,80")
         plot_hysteresis_loop(
@@ -935,7 +934,7 @@ def step4_repeat_and_average(
             plot_file,
             overlay_down_files=dat_files_down,
             overlay_up_files=dat_files_up,
-            num_runs=total_runs,
+            num_runs=num_repeats,
             grains=mesh_grains,
             extent=mesh_extent,
         )
