@@ -354,6 +354,18 @@ Examples:
         help="Direct mesh element size in mesh units; overrides coarse/fine presets",
     )
     parser.add_argument(
+        "--K",
+        type=float,
+        metavar="K",
+        help="Air shell expansion factor K to pass to loop.py (overrides .p2 if provided)",
+    )
+    parser.add_argument(
+        "--KL",
+        type=float,
+        metavar="KL",
+        help="Air shell thickness factor KL to pass to loop.py (overrides .p2 if provided)",
+    )
+    parser.add_argument(
         "--hstep",
         type=float,
         metavar="VALUE",
@@ -477,6 +489,7 @@ Examples:
     # Step0.1: select coarse, fine, or custom mesh h, newly generate mesh if needed
     #   + coarse mesh: python src/mesh.py --geom eye --extent 3.5,1.0,0.01 --h 0.03 --backend meshpy --out-name eye_meshpy --verbose
     #   + fine mesh: python src/mesh.py --geom eye --extent 3.5,1.0,0.01 --h 0.005 --backend meshpy --out-name eye_meshpy --verbose
+    # This step only creates the mesh for the eye shaped sensor, not for the surrounding air region
     print("\n" + "-" * 80)
     print("SENSOR-EXAMPLE, STEP 0.1: Mesh Selection and Generation")
     print("-" * 80)
@@ -565,11 +578,12 @@ Examples:
 
     loop_script = (base / "src/loop.py").resolve()
 
-    loop_cmd_in_main = [
-        "python",
-        str(loop_script),
-        "--mesh",
-    ]
+    loop_cmd_in_main: list[str] = ["python", str(loop_script)]
+    if args.K is not None:
+        loop_cmd_in_main.extend(["--K", str(args.K)])
+    if args.KL is not None:
+        loop_cmd_in_main.extend(["--KL", str(args.KL)])
+    loop_cmd_in_main.append("--mesh")
     # Step0.2: remove previous output files like sensor.*.state.npz and sensor.dat in all case directories
     print("\n" + "-" * 80)
     print("SENSOR-EXAMPLE, STEP 0.2: Cleanup Previous Output Files")
