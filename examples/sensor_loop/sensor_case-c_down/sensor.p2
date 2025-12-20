@@ -10,7 +10,7 @@ ini = 2
 [field]
 hstart = 0.0314159
 hfinal =  -0.0314159
-hstep = -0.00123
+hstep = -0.0005
 
 hx = 0. 
 hy = 1.
