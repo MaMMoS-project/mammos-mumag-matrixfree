@@ -182,7 +182,7 @@ if [ "$USE_PIXI" = false ]; then
 else
     find examples/sensor_loop/ -type f -name '*.p2' -exec grep -Hn -i -E 'h[_ ]?step' {} \;
     find examples/sensor_loop/sensor_initial_state -type f -name '*.npz' 
-    $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --mesh-h $MESH_H --hstep $HSTEP --only-compute-initial-state
+    $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --mesh-h $MESH_H --hstep $HSTEP --only-compute-initial-state  --KL $KL_air --K $K_air
     find examples/sensor_loop/sensor_initial_state -type f -name '*.npz'
     cp ./examples/sensor_loop/sensor_initial_state/sensor.0002.state.npz $SLURM_SUBMIT_DIR/examples/sensor_loop/sensor_initial_state/backup_sensor_mesh_h${MESH_H}_hstep${HSTEP}.0002.state.npz
     find examples/sensor_loop/sensor_initial_state -type f -name '*.vtu' 
