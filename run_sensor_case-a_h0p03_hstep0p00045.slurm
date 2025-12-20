@@ -57,7 +57,7 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export PIXI_PROJECT_ROOT=$SLURM_SUBMIT_DIR
 # Tag for result collection directory (UTC timestamp + slurm id + parameters)
 RESULT_TAG=$(date -u +"%Y%m%dT%H%M%SZ")_slurm_${SLURM_JOB_ID}_h${MESH_H}_hstep${HSTEP}_case${CASES}
-RESULT_BASE=$SLURM_SUBMIT_DIR/examples/sensor_loop/$RESULT_TAG
+RESULT_BASE=$SLURM_SUBMIT_DIR/examples/sensor_loop/results/$RESULT_TAG
 
 # ============================================================================
 # ENVIRONMENT CONFIGURATION
