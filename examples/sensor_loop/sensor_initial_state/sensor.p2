@@ -19,5 +19,5 @@ mstep = 0.1
 mfinal = -1.0
 
 [minimizer] 
-tol_fun = 1e-10
+tol_fun = 1e-12
 
