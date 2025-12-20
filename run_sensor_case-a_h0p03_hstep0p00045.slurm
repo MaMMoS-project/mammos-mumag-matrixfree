@@ -50,6 +50,8 @@ HSTEP_INI="0.00025"
 # Choose cases to run: a, b, c or combinations like ab, ac, bc, abc
 # CASES="a b c"
 CASES="a"
+KL_air="5.0"
+K_air="1.3"
 # ============================================================================
 
 # Set variables
@@ -185,11 +187,11 @@ done
 echo "Before RUNNING SIMULATION : sensor loop step by step.py"
 echo "SIMULATION PARAMETERS: MESH_H=$MESH_H, HSTEP=$HSTEP, CASES=$CASES"
 if [ "$USE_PIXI" = false ]; then
-    $MAMBA_EXE run -n $ENV_NAME python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.npz
+    $MAMBA_EXE run -n $ENV_NAME python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.npz --KL $KL_air --K $K_air
 else
     find examples/sensor_loop/ -type f -name '*.p2' -exec grep -Hn -i -E 'h[_ ]?step' {} \;
     find examples/sensor_loop/sensor_initial_state -type f -name '*.npz' 
-    $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.npz
+    $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u ./examples/sensor_loop/sensor_loop_step_by_step.py --hstep $HSTEP --cases $CASES --initial-state-file backup_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.0002.state.npz --initial-mesh-file backup_mesh_sensor_mesh_h${MESH_H}_hstep${HSTEP_INI}.npz --KL $KL_air --K $K_air
     find examples/sensor_loop/ -type f -name '*.p2' -exec grep -Hn -i -E 'h[_ ]?step' {} \;
 fi
 echo "After RUNNING SIMULATION : sensor loop step by step.py"
