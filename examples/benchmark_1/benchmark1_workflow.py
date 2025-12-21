@@ -42,6 +42,11 @@ import shutil
 import sys
 from pathlib import Path
 from typing import List, Optional
+import ast
+
+# Module-level overlay options (set in main via CLI)
+OVERLAY_OOMMF_EASY_FILE: Optional[Path] = None
+OVERLAY_OOMMF_MS: Optional[float] = None
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -373,6 +378,36 @@ def step3b_run_loop_up(base: Path, benchmark_dir: Path, num_loops: int = 1) -> N
 # PLOTTING UTILITIES
 # =============================================================================
 
+def _read_oommf_easy_processed_csv(csv_path: Path):
+    """Read OOMMF processed 'easy' CSV produced by plot_oommf_sweeps.py.
+
+    Returns dict with keys 'H_A_per_m', 'M_over_Ms'.
+    The file format stores full arrays in a single CSV row as stringified lists.
+    """
+    non_comment_lines = []
+    with open(csv_path, 'r') as f:
+        for line in f:
+            if line.strip().startswith('#'):
+                continue
+            non_comment_lines.append(line)
+    import csv as _csv
+    reader = _csv.reader(non_comment_lines)
+    data_row = None
+    for row in reader:
+        if not row:
+            continue
+        if len(row) >= 3 and row[0].strip().startswith('[') and row[2].strip().startswith('['):
+            data_row = row
+            break
+    if data_row is None:
+        raise ValueError(f"No data row found in {csv_path}")
+    H_list = ast.literal_eval(data_row[0])
+    M_over_Ms_list = ast.literal_eval(data_row[2])
+    return {
+        'H_A_per_m': H_list,
+        'M_over_Ms': M_over_Ms_list,
+    }
+
 def plot_hysteresis_loop(
     data_file: Path, 
     output_file: Path, 
@@ -420,6 +455,21 @@ def plot_hysteresis_loop(
         
         # Create plot with secondary axes (bottom: Tesla, top: kA/m)
         fig, ax_left = plt.subplots(figsize=(10, 6))
+
+        # Optional overlay: OOMMF easy-axis processed CSV (matches 'easy-axis' plot)
+        try:
+            if OVERLAY_OOMMF_EASY_FILE is not None:
+                easy = _read_oommf_easy_processed_csv(OVERLAY_OOMMF_EASY_FILE)
+                ms_val = OVERLAY_OOMMF_MS if (OVERLAY_OOMMF_MS is not None and OVERLAY_OOMMF_MS > 0) else 800000.0
+                H_oommf_T = mu0 * np.array(easy['H_A_per_m'], dtype=float)
+                M_oommf_kApm = (np.array(easy['M_over_Ms'], dtype=float) * ms_val) / 1e3
+                ax_left.plot(
+                    H_oommf_T, M_oommf_kApm,
+                    color='red', linestyle='--', linewidth=1.5,
+                    label='OOMMF easy-axis'
+                )
+        except Exception as e:
+            print(f"[WARNING] Failed to overlay OOMMF easy-axis: {e}", file=sys.stderr)
 
         # Track plot handles and labels for separate legends
         individual_handles = []
@@ -1160,6 +1210,20 @@ Examples:
         action="store_true",
         help="Remove (or backup with --backup) existing results in results/ before averaging (useful with --average-only)",
     )
+    parser.add_argument(
+        "--overlay-oommf-easy",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Path to processed OOMMF easy-axis CSV (e.g., oommf_sweeps_easy_H_M_MoverMs.csv) to overlay on the plot",
+    )
+    parser.add_argument(
+        "--overlay-oommf-ms",
+        type=float,
+        default=None,
+        metavar="Ms",
+        help="Ms (A/m) to convert OOMMF normalized magnetization to kA/m (default: 800000)",
+    )
     
     args = parser.parse_args()
     
@@ -1171,6 +1235,11 @@ Examples:
     average_only = args.average_only
     backup_existing = args.backup
     clean_results = args.clean_results
+    # Set module-level overlay options
+    if args.overlay_oommf_easy is not None:
+        global OVERLAY_OOMMF_EASY_FILE, OVERLAY_OOMMF_MS
+        OVERLAY_OOMMF_EASY_FILE = args.overlay_oommf_easy
+        OVERLAY_OOMMF_MS = args.overlay_oommf_ms
     
     # Resolve paths relative to this script's directory
     run_dir = Path(__file__).resolve().parent
