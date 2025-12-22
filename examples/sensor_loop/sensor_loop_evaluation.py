@@ -19,10 +19,10 @@ where:
     Rmin                         ... Minimum resistance (parallel state) [Ω]
 
 Typical TMR sensor parameters (CoFeB/MgO/CoFeB at room temperature):
-    - TMR = 1.5 (150% magnetoresistance)
+    - TMR = 1.0 (100% magnetoresistance) [MaMMoS D6.2]
     - Rmin = 1 kΩ
-    - P² = 1.5 / (2 + 1.5) = 0.4286
-    - G₀ = 1 / (1000 * 1.4286) ≈ 7.0e-4 S
+    - P² = 1.0 / (2 + 1.0) = 0.3333
+    - G₀ = 1 / (1000 * 1.3333) ≈ 7.5e-4 S
 
 Material parameters (Permalloy Ni₈₀Fe₂₀):
     - Ms = 800 kA/m = 800,000 A/m (saturation magnetization)
@@ -43,6 +43,7 @@ import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
+import mammos_entity as me
 
 # Ensure unbuffered output for real-time logging
 import os
@@ -136,6 +137,75 @@ def concatenate_sensor_data(down_file: Path, up_file: Path, output_file: Path) -
     np.savetxt(output_file, combined_data, header=header, comments="")
 
 
+def load_oommf_reference(csv_path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """Load OOMMF reference sweep (H, M, M/Ms) from MaMMoS benchmark entity.
+
+    Uses the mammos-entity library to read the CSV file with proper unit handling.
+    Expected columns: H [A/m], M [A/m], M/Ms [dimensionless]
+
+    Returns:
+        Tuple of (Hext_kA_per_m, M_over_Ms) as numpy arrays.
+    """
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Reference CSV not found: {csv_path}")
+
+    try:
+        # Read entities using mammos-entity library (returns EntityCollection)
+        entity_collection = me.io.entities_from_file(csv_path)
+        
+        # Access columns using attribute notation (not subscripting)
+        # EntityCollection allows accessing columns like: entity_collection.column_name
+        
+        # Extract H field in A/m and convert to kA/m
+        # Try common column name variations
+        H_entity = None
+        if hasattr(entity_collection, 'H'):
+            H_entity = entity_collection.H
+        elif hasattr(entity_collection, 'Hext'):
+            H_entity = entity_collection.Hext
+        else:
+            raise ValueError(f"Could not find H or Hext column in {csv_path}")
+        
+        # Extract value from Entity object
+        # Entity objects have .value attribute containing the actual data
+        if hasattr(H_entity, 'value'):
+            H_A_per_m = np.array(H_entity.value, dtype=float)
+        elif hasattr(H_entity, 'values'):
+            H_A_per_m = np.array(H_entity.values, dtype=float)
+        else:
+            # Fallback: might be a plain array or quantity
+            H_A_per_m = np.array(H_entity, dtype=float)
+        
+        Hext_kA_per_m = H_A_per_m / 1e3
+        
+        # Extract normalized magnetization M/Ms (dimensionless)
+        M_entity = None
+        if hasattr(entity_collection, 'M_over_Ms'):
+            M_entity = entity_collection.M_over_Ms
+        elif hasattr(entity_collection, 'MoverMs'):
+            M_entity = entity_collection.MoverMs
+        else:
+            raise ValueError(f"Could not find M_over_Ms column in {csv_path}")
+        
+        # Extract value from Entity object
+        if hasattr(M_entity, 'value'):
+            M_over_Ms = np.array(M_entity.value, dtype=float)
+        elif hasattr(M_entity, 'values'):
+            M_over_Ms = np.array(M_entity.values, dtype=float)
+        else:
+            # Fallback: might be a plain array
+            M_over_Ms = np.array(M_entity, dtype=float)
+        
+        # Success message
+        print(f"[INFO] Successfully loaded OOMMF reference data from {csv_path.name}")
+        print(f"       Data points: {len(Hext_kA_per_m)}, H range: [{Hext_kA_per_m.min():.2f}, {Hext_kA_per_m.max():.2f}] kA/m")
+        
+        return Hext_kA_per_m, M_over_Ms
+        
+    except Exception as exc:
+        raise ValueError(f"Failed to load reference data from {csv_path}: {exc}") from exc
+
+
 def find_in_up_M_over_Ms_near_value(
     data_file: Path, value=1.0, tolerance=0.05, Ms_in_A_Per_m=800e3
 ) -> tuple[float, float] | tuple[None, None]:
@@ -213,8 +283,11 @@ def plot_sensor_data_a(
             original_data_file, value=1.0, tolerance=0.05, Ms_in_A_Per_m=Ms_in_A_Per_m
         )
         if Hs_in_kA_Per_m is not None:
+            Hs_A_per_m = Hs_in_kA_Per_m * 1000.0
             logger.info(
-                f"  [ANALYSIS] Case {figure_name}: Saturation field Hs ≈ {Hs_in_kA_Per_m:.2f} kA/m (M/Ms = {M_over_Ms_value:.3f})"
+                f"Saturation field (reset field, easy axis):\n"
+                f"  Hs = {Hs_A_per_m:.4g} A/m\n"
+                f"  M/Ms at Hs = {M_over_Ms_value:.4g}"
             )
         else:
             logger.info(
@@ -245,12 +318,12 @@ def plot_sensor_data_a(
             "o",
             color="C1",
             markersize=8,
-            label=f"Saturation: Hs = {Hs_in_kA_Per_m:.2f} kA/m",
+                label=f"Saturation: Hs = {Hs_in_kA_Per_m:.4g} kA/m",
             zorder=5,
         )
 
     plt.xlabel("Applied Field Hext (kA/m)", fontsize=11)
-    plt.ylabel("Normalized Magnetization M/Ms", fontsize=11)
+    plt.ylabel("Normalized Magnetization M/Ms (dimensionless)", fontsize=11)
     plt.title(f"Hysteresis Loop - Case {figure_name}", fontsize=12, fontweight="bold")
     plt.legend(loc="best", fontsize=10)
     plt.grid(True, alpha=0.3)
@@ -305,8 +378,10 @@ def plot_sensor_data_b(
             original_data_file, value=0.0, tolerance=0.05, Ms_in_A_Per_m=Ms_in_A_Per_m
         )
         if Hc45_in_kA_Per_m is not None:
+            Hc45_A_per_m = Hc45_in_kA_Per_m * 1000.0
             logger.info(
-                f"  [ANALYSIS] Case {figure_name}: Coercivity Hc45 ≈ {Hc45_in_kA_Per_m:.2f} kA/m (M/Ms = {M_over_Ms_value:.3f})"
+                f"Coercivity at 45° (diagonal axis):\n"
+                f"  Hc,45° = {Hc45_A_per_m:.4g} A/m"
             )
         else:
             logger.info(
@@ -337,12 +412,12 @@ def plot_sensor_data_b(
             "o",
             color="C1",
             markersize=8,
-            label=f"Coercivity: Hc45 = {Hc45_in_kA_Per_m:.2f} kA/m",
+                label=f"Coercivity: Hc45 = {Hc45_in_kA_Per_m:.4g} kA/m",
             zorder=5,
         )
 
     plt.xlabel("Applied Field Hext (kA/m)", fontsize=11)
-    plt.ylabel("Normalized Magnetization M/Ms", fontsize=11)
+    plt.ylabel("Normalized Magnetization M/Ms (dimensionless)", fontsize=11)
     plt.title(f"Hysteresis Loop - Case {figure_name}", fontsize=12, fontweight="bold")
     plt.legend(loc="best", fontsize=10)
     plt.grid(True, alpha=0.3)
@@ -364,7 +439,7 @@ def extract_linear_range(
     M_over_Ms: np.ndarray,
     Hext_kA_per_m: np.ndarray,
     *,
-    G_over_Ms: Optional[np.ndarray] = None,
+    G_H: Optional[np.ndarray] = None,
     window_half_width: float = 2.5,
     min_window_points: int = 5,
 ) -> Optional[dict]:
@@ -375,24 +450,22 @@ def extract_linear_range(
 
     - Magnetic sensitivity: slope of M(H) for sweep c) in -2.5 kA/m < H < 2.5 kA/m
     - Electrical sensitivity: slope of G(H) in the same window, where G(H) is
-      the normalized TMR conductance computed from the x-component magnetization:
+      the actual TMR conductance in Siemens computed using the Slonczewski formula:
 
-      G(H) = Mx / (μ₀ · Ms)  [simplified form]
-
-      or using full TMR formula (Table 2 in MaMMoS D6.2):
-      G(H) = G₀ (1 + P² cos θ)
-      where:
-        - G₀ = 1 / (Rmin * (1 + P²)) is the baseline conductance
-        - P² = TMR / (2 + TMR) is the polarization factor
-        - cos θ = Mx / Ms is the normalized x-component (pinned layer along +x)
-        - TMR is the tunneling magnetoresistance ratio
+      G(H) = G₀ (1 + P² cos θ)  [Siemens]
+      
+      where (from Table 2 in MaMMoS D6.2):
+        - G₀ = 1 / (Rmin * (1 + P²)) is the baseline conductance [S]
+        - P² = TMR / (2 + TMR) is the polarization factor [dimensionless]
+        - cos θ = Mx / Ms is the normalized x-component (pinned layer along +x) [dimensionless]
+        - TMR is the tunneling magnetoresistance ratio [dimensionless]
 
     - Non-linearity: maximum absolute residual of M(H) from the magnetic fit
 
     Args:
         M_over_Ms: Normalized magnetization values (projection along applied field)
         Hext_kA_per_m: Applied field values in kA/m
-        G_over_Ms: Optional normalized x-component magnetization G(H) = Mx/(μ₀·Ms)
+        G_H: Optional actual conductance G(H) in Siemens computed from Slonczewski formula
             for electrical sensitivity computation (pinned layer along +x easy axis)
         window_half_width: Half-width of the symmetric fit window around H=0
         min_window_points: Minimum number of samples required in the window
@@ -421,8 +494,8 @@ def extract_linear_range(
         "non_linearity": non_linearity,
     }
 
-    if G_over_Ms is not None:
-        G_window = G_over_Ms[centered_mask]
+    if G_H is not None:
+        G_window = G_H[centered_mask]
         g_slope, g_intercept = np.polyfit(H_window, G_window, 1)
         g_fit = g_slope * H_window + g_intercept
         result.update(
@@ -503,17 +576,17 @@ def extract_electrical_sensitivity(
     print("### Electrical sensitivity analysis results:")
     print(f"Data file: {data_file}")
     print(f"Points in field window: {H_window.size}")
-    print(f"Hext window (kA/m): {H_window.min():.4f} .. {H_window.max():.4f}")
-    print(f"Slope (dG/dH): {slope:.6e} S/(kA/m)")
-    print(f"Intercept (G_fit at H=0): {intercept:.6e} S")
-    print(f"Computed G0 (from RA/area/TMR): {G0:.6e} S")
-    print(f"P^2 used: {p_squared:.6e}")
-    print(f"Rmin (ohm): {Rmin_ohm:.6e}")
+    print(f"Hext window (kA/m): {H_window.min():.4g} .. {H_window.max():.4g}")
+    print(f"Slope (dG/dH): {slope:.4g} S/(kA/m)")
+    print(f"Intercept (G_fit at H=0): {intercept:.4g} S")
+    print(f"Computed G0 (from RA/area/TMR): {G0:.4g} S")
+    print(f"P^2 used: {p_squared:.4g}")
+    print(f"Rmin (ohm): {Rmin_ohm:.4g}")
     rmse = np.sqrt(np.mean(residuals**2))
     max_abs_res = np.max(np.abs(residuals))
     mean_res = np.mean(residuals)
     print(
-        f"Residuals: mean={mean_res:.6e} S, rms={rmse:.6e} S, max_abs={max_abs_res:.6e} S"
+        f"Residuals: mean={mean_res:.4g} S, rms={rmse:.4g} S, max_abs={max_abs_res:.4g} S"
     )
     # print()
     # print("Index  H(kA/m)     G(S)            G_fit(S)        Residual(S)")
@@ -542,6 +615,8 @@ def plot_sensor_data_c(
     min_window_points: int = 5,
     logger: logging.Logger | None = None,
     filename_suffix: str = "",
+    upward_only_fit: bool = False,
+    reference_oommf_csv: Path | None = None,
 ) -> None:
     """Plot hard-axis hysteresis loop and benchmark sensitivities for sweep c).
 
@@ -556,6 +631,9 @@ def plot_sensor_data_c(
         - cos θ = Mx / Ms is the angle between free and pinned layer magnetizations
         - Rmin = minimum resistance (pinned layer along +x easy axis)
     - Non-linearity: maximum residual of M(H) from that linear fit
+
+    If reference_oommf_csv is provided, overlay the OOMMF benchmark M/Ms vs Hext
+    curve (kA/m) on the primary axis for visual comparison.
 
     Args:
         data_file: Path to concatenated hysteresis data file
@@ -575,56 +653,90 @@ def plot_sensor_data_c(
     Ms = 800e3  # Saturation magnetization [A/m] for sensor example
 
     # TMR sensor parameters (Table 2 from MaMMoS Deliverable 6.2)
-    # Typical values for CoFeB/MgO/CoFeB TMR sensor at room temperature
-    TMR = 1.5  # Tunneling magnetoresistance ratio (150% TMR)
-    Rmin = 1.0e3  # Minimum resistance [Ω] (parallel configuration)
+    # Benchmark values for magnetic field sensor
+    TMR = 1.0  # Tunneling magnetoresistance ratio (100% TMR) [MaMMoS D6.2]
+    RA_kOhm_um2 = 1.0  # Resistance-area product [kΩ·μm²]
+    A_um2 = 2.33  # Junction area [μm²]
+    Rmin = (RA_kOhm_um2 / A_um2) * 1e3  # Minimum resistance [Ω]: (1 / 2.33) * 1000 ≈ 429 Ω
 
     # Derived TMR parameters
     P2 = TMR / (2.0 + TMR)  # Polarization factor P²
     G0 = 1.0 / (Rmin * (1.0 + P2))  # Baseline conductance [S]
 
     # Note: Full TMR formula is G(H) = G₀ (1 + P² cos θ)
-    # For benchmark electrical sensitivity, we use the normalized form Mx/Ms = cos(θ)
-    # which captures the field-dependent behavior independent of device resistance
+    # For hard-axis benchmark, the pinned reference layer is along (0,1,0) [hard axis]
+    # so cos θ = My/Ms matches the applied field direction (y-axis hard axis)
+    # which captures the field-dependent behavior of the free layer magnetization
 
     # Data columns: [0]=index, [1]=mu0*Hext(T), [2]=J·h(T), [3]=Jx(T), [4]=Jy(T), [5]=Jz(T)
     Hext_T = data[:, 1]  # External field [T]
     J_h_T = data[:, 2]  # Magnetization response projected onto applied field [T]
-    Jx_T = data[:, 3]  # Magnetization component along x (easy axis direction) [T]
+    Jy_T = data[:, 4]  # Magnetization component along y (hard axis direction) [T]
 
     # Convert to physical units
     Hext_kA_per_m = Hext_T / mu0 / 1e3  # External field [kA/m]
     M_over_Ms = (J_h_T / mu0) / Ms  # Normalized magnetization along applied field
 
-    # Electrical sensitivity using simplified form: G(H) = Mx / (μ₀ · Ms)
-    # where Mx is the x-component magnetization (pinned layer reference along +x easy axis)
-    Mx_over_Ms = Jx_T / mu0 / Ms  # Normalized x-component: cos(θ)
+    # Compute cos(θ) for the Slonczewski MTJ model:
+    # With pinned layer along y (hard axis), cos(θ) = My/Ms
+    My_over_Ms = Jy_T / mu0 / Ms  # Normalized y-component: cos(θ)
 
-    # Full TMR formula: G(H) = G₀ (1 + P² cos θ)
-    # For benchmark comparison, we use the normalized form: G(H) / G₀ = 1 + P² cos θ
-    # This simplifies to tracking Mx/Ms for the linear sensitivity
-    G_over_Ms = Mx_over_Ms  # Use simplified normalized form for sensitivity
+    # Compute actual conductance G(H) using Slonczewski formula (MaMMoS D6.2, Table 2):
+    # G(H) = G₀(1 + P²·cos θ) in Siemens
+    G_H = G0 * (1.0 + P2 * My_over_Ms)  # Conductance in Siemens
 
-    # Print TMR sensor parameters
-    logger.info(
-        f"  [TMR PARAMS] TMR ratio = {TMR:.2f} ({TMR * 100:.0f}%), P² = {P2:.4f}, G₀ = {G0:.6e} S, Rmin = {Rmin:.2e} Ω"
-    )
+    # Keep full data for plotting
+    Hext_kA_per_m_full = Hext_kA_per_m
+    M_over_Ms_full = M_over_Ms
+    G_H_full = G_H
+
+    # If requested, restrict analysis to upward branch only (from min(H) to end)
+    if upward_only_fit:
+        try:
+            idx_min = int(np.argmin(Hext_kA_per_m))
+        except Exception:
+            idx_min = 0
+        Hext_kA_per_m = Hext_kA_per_m[idx_min:]
+        M_over_Ms = M_over_Ms[idx_min:]
+        G_H = G_H[idx_min:]
 
     # Compute benchmark sensitivities on the fixed ±window_half_width interval
+    # (uses sliced data if upward_only_fit is True)
     linear_metrics = extract_linear_range(
         M_over_Ms,
         Hext_kA_per_m,
-        G_over_Ms=G_over_Ms,
+        G_H=G_H,
         window_half_width=window_half_width,
         min_window_points=min_window_points,
     )
 
-    # Generate plot
-    plt.figure(figsize=(10, 6))
-    plt.plot(Hext_kA_per_m, M_over_Ms, "C0-", linewidth=1.5, label="Hysteresis loop")
-    plt.plot(Hext_kA_per_m, M_over_Ms, "C0+", markersize=4, alpha=0.6, label="Data points")
+    # Generate plot (always use full data for visualization)
+    fig, ax = plt.subplots(figsize=(10, 6))
 
-    plt.axvspan(
+    # Optional overlay: OOMMF benchmark reference M/Ms vs Hext
+    if reference_oommf_csv is not None:
+        try:
+            logger.info(f"  [REFERENCE] Loading OOMMF reference from: {reference_oommf_csv.name}")
+            ref_H_kA_per_m, ref_M_over_Ms = load_oommf_reference(reference_oommf_csv)
+            ax.plot(
+                ref_H_kA_per_m,
+                ref_M_over_Ms,
+                color="k",
+                linestyle="",
+                linewidth=1.4,
+                marker="*",
+                markersize=7,
+                alpha=0.65,
+                label="OOMMF reference M/Ms",
+            )
+            logger.info(f"  [REFERENCE] Successfully plotted OOMMF reference overlay")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.info(f"  [WARNING] Failed to load OOMMF reference: {exc}")
+
+    ax.plot(Hext_kA_per_m_full, M_over_Ms_full, "C0-", linewidth=1.5, label="Hysteresis loop M/Ms")
+    ax.plot(Hext_kA_per_m_full, M_over_Ms_full, "C0+", markersize=4, alpha=0.6, label="Data points")
+
+    ax.axvspan(
         -window_half_width,
         window_half_width,
         color="gray",
@@ -632,15 +744,13 @@ def plot_sensor_data_c(
         label=f"Fit window ±{window_half_width:.1f} kA/m",
         zorder=1,
     )
-
-    # Highlight fits if available
     if linear_metrics:
         H_win = linear_metrics["H_window"]
         fit_sort = np.argsort(H_win)
         mag_sens = linear_metrics["magnetic_sensitivity"]
         mag_int = linear_metrics["magnetic_intercept"]
-        fit_label = f"Linear fit M(H): \n magnetic_sensitivity={mag_sens:.4f},\n magnetic_intercept={mag_int:.4f}"
-        plt.plot(
+        fit_label = f"Linear fit M/Ms vs H{' (up-branch)' if upward_only_fit else ''}"
+        ax.plot(
             H_win[fit_sort],
             linear_metrics["magnetic_fit"][fit_sort],
             "C1--",
@@ -649,37 +759,102 @@ def plot_sensor_data_c(
             zorder=4,
         )
 
-        logger.info(
-            f"  [ANALYSIS] Case {figure_name}: Magnetic sensitivity (|H| ≤ {window_half_width:.1f} kA/m) = {linear_metrics['magnetic_sensitivity']:.4f} (ΔM/Ms)/(kA/m)"
-        )
+        # Format output according to template
+        window_A_per_m = window_half_width * 1000.0
+        mag_sens_per_A_per_m = mag_sens / 1000.0  # Convert from (dimensionless)/(kA/m) to (dimensionless)/(A/m)
+        dM_dH = Ms * mag_sens_per_A_per_m  # Slope of M(H): M_s [A/m] × (dimensionless)/(A/m) = dimensionless = (A/m)/(A/m)
+        mag_int_A_per_m = mag_int * Ms  # Convert from M/Ms to A/m
+        nonlin_A_per_m = linear_metrics['non_linearity'] * Ms  # Convert from M/Ms to A/m
+        
+        logger.info(f"\nHard-axis sensitivity (sweep c):")
+        logger.info(f"\n  Magnetic sensitivity:")
+        logger.info(f"    Fit window: H ∈ [{-window_A_per_m:.4g}, {window_A_per_m:.4g}] A/m")
+        logger.info(f"    Slope (dM/dH): {dM_dH:.4g} (A/m)/(A/m)")
+        logger.info(f"    Intercept: {mag_int_A_per_m:.4g} A/m")
+        logger.info(f"    Points used: {linear_metrics.get('H_window', []).size if hasattr(linear_metrics.get('H_window', []), 'size') else len(linear_metrics.get('H_window', []))}")
+        
         if "electrical_sensitivity" in linear_metrics:
-            logger.info(
-                f"  [ANALYSIS] Case {figure_name}: Electrical sensitivity (|H| ≤ {window_half_width:.1f} kA/m) = {linear_metrics['electrical_sensitivity']:.4f} (ΔG/ΔH) where G=Mx/(μ₀·Ms)"
-            )
-        logger.info(
-            f"  [ANALYSIS] Case {figure_name}: Non-linearity (max |residual| from M(H) fit) = {linear_metrics['non_linearity']:.4f} ΔM/Ms"
-        )
+            elec_sens = linear_metrics["electrical_sensitivity"]
+            elec_int = linear_metrics["electrical_intercept"]
+            dG_dH = elec_sens / 1000.0  # Convert from S/(kA/m) to S/(A/m)
+            
+            logger.info(f"\n  Electrical model (Slonczewski MTJ):")
+            logger.info(f"    P² (spin polarization): {P2:.4g}")
+            logger.info(f"    Rmin: {Rmin:.4g} Ω")
+            logger.info(f"    G₀: {G0*1e3:.4g} mS")
+            logger.info(f"    Slope (dG/dH): {dG_dH:.4g} S/(A/m)")
+            logger.info(f"    Intercept: {elec_int:.4g} S")
+        
+        logger.info(f"\n  Non-linearity:")
+        logger.info(f"    Max residual: {nonlin_A_per_m:.4g} A/m")
     else:
         logger.info(
             f"  [WARNING] Case {figure_name}: Insufficient data in ±{window_half_width:.1f} kA/m window to compute sensitivities"
         )
 
-    plt.xlabel("Applied Field Hext (kA/m)", fontsize=11)
-    plt.ylabel("Normalized Magnetization M/Ms", fontsize=11)
-    plt.title(f"Hysteresis Loop - Case {figure_name}", fontsize=12, fontweight="bold")
-    plt.legend(loc="best", fontsize=10)
-    plt.grid(True, alpha=0.3)
+    # Set up primary y-axis (left): M/Ms (dimensionless)
+    ax.set_xlabel("Applied Field Hext (kA/m)", fontsize=11)
+    ax.set_ylabel("M/Ms (dimensionless)", fontsize=11, color="C0")
+    ax.tick_params(axis="y", labelcolor="C0")
+    ax.set_ylim(-1.05, 1.05)
     if xlim:
-        plt.xlim(*xlim)
-    if ylim:
-        plt.ylim(*ylim)
+        ax.set_xlim(*xlim)
     else:
-        plt.ylim(-1.05, 1.05)
-    plt.tight_layout()
+        ax.set_xlim(-15, 15)
+    ax.grid(True, alpha=0.3)
+    
+    # Create twin y-axis (middle right): M in kA/m
+    ax2 = ax.twinx()
+    ax2.set_ylabel("M (kA/m)", fontsize=11, color="C0")
+    ax2.tick_params(axis="y", labelcolor="C0")
+    # Scale the axis: M = Ms * (M/Ms) / 1000 [convert A/m to kA/m]
+    y1_min, y1_max = ax.get_ylim()
+    y2_min = Ms * y1_min / 1000.0
+    y2_max = Ms * y1_max / 1000.0
+    ax2.set_ylim(y2_min, y2_max)
+    
+    # Create second twin y-axis (far right): G(H) in mS
+    ax3 = ax.twinx()
+    ax3.spines["right"].set_position(("outward", 60))  # Offset third axis to the right
+    ax3_color = "C2"
+    ax3_curve = ax3.plot(Hext_kA_per_m_full, G_H_full * 1000.0, color=ax3_color, linestyle=":", linewidth=3, alpha=0.5,
+                         label="Conductance G(H)", zorder=1)
+    ax3.set_ylabel("G(H) (mS)", fontsize=11, color=ax3_color)
+    ax3.tick_params(axis="y", labelcolor=ax3_color)
+    # Scale far-right axis symmetrically around G0 to visually align with the M/Ms swing
+    g_center_mS = G0 * 1000.0
+    g_span_mS = G0 * P2 * 1000.0  # Ideal half-span from G0 when My/Ms spans [-1, 1]
+    data_span_mS = float(np.max(np.abs(G_H_full * 1000.0 - g_center_mS)))
+    half_span_mS = 1.05 * max(g_span_mS, data_span_mS)  # Small padding
+    ax3.set_ylim(g_center_mS - half_span_mS, g_center_mS + half_span_mS)
+    
+    # Add text annotation with the actual benchmark metric
+    if linear_metrics and "electrical_sensitivity" not in linear_metrics:
+        # Only magnetic sensitivity available
+        textstr = f"Benchmark Magnetic Sensitivity (dM/dH):\n{dM_dH:.4g} (A/m)/(A/m)"
+        ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=9,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    elif linear_metrics and "electrical_sensitivity" in linear_metrics:
+        # Both sensitivities available
+        textstr = f"Benchmark Metrics:\nMagnetic: dM/dH = {dM_dH:.4g} (A/m)/(A/m)\nElectrical: dG/dH = {dG_dH:.4g} S/(A/m)"
+        ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=9,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
+    
+    ax.set_title(f"Hysteresis Loop - Case {figure_name}", fontsize=12, fontweight="bold")
+    
+    # Combine all legend entries from both axes
+    handles_ax, labels_ax = ax.get_legend_handles_labels()
+    handles_g, labels_g = ax3.get_legend_handles_labels()
+    
+    # Create combined legend in lower right, ensuring OOMMF reference is included
+    all_handles = handles_ax + handles_g
+    all_labels = labels_ax + labels_g
+    ax.legend(all_handles, all_labels, loc="lower right", fontsize=9, framealpha=0.9)
+    fig.tight_layout()
 
     save_path = output_file_path / f"sensor_case-c-{figure_name}{filename_suffix}.png"
-    plt.savefig(save_path.resolve(), dpi=300)
-    plt.close()
+    fig.savefig(save_path.resolve(), dpi=300)
+    plt.close(fig)
     logger.info(f"  [PLOT] Saved: {save_path.name}")
 
 
@@ -729,6 +904,11 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
         help="Plot hard-axis hysteresis (case c) from specified .dat file",
     )
     parser.add_argument(
+        "--fit-c-upward-only",
+        action="store_true",
+        help="For case-c fits, use only the upward branch (from min H onward)",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         metavar="DIR",
@@ -753,6 +933,12 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
         type=Path,
         metavar="FILE",
         help="Up-sweep-only data file for saturation detection (default: same as --plot-a)",
+    )
+    parser.add_argument(
+        "--oommf-reference-hard",
+        type=Path,
+        metavar="FILE",
+        help="Optional OOMMF reference CSV for hard-axis overlay (M/Ms vs Hext)",
     )
     parser.add_argument(
         "--cases",
@@ -950,6 +1136,11 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
         # Hard-axis sensitivity analysis parameters
         window_half_width = 2.5  # Fixed benchmark window for sensitivities
         min_window_points = 5  # Minimum points needed in linear window
+
+        reference_oommf_csv = args.oommf_reference_hard.resolve() if args.oommf_reference_hard else None
+        if reference_oommf_csv and not reference_oommf_csv.exists():
+            logger.info(f"[WARNING] OOMMF reference CSV not found: {reference_oommf_csv}")
+            reference_oommf_csv = None
         
         logger.info("=" * 80)
         logger.info("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case c)")
@@ -959,6 +1150,8 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
         logger.info(f"[PLOT]   X-axis range: {plot_xlim[0]} to {plot_xlim[1]} kA/m")
         logger.info(f"[PLOT]   Figure name: {args.figure_name}")
         logger.info(f"[PLOT]   Fit window: ±{window_half_width} kA/m")
+        if args.fit_c_upward_only:
+            logger.info("[PLOT]   Fit branch: upward-only")
         logger.info("")
         
         # Extract parameters if requested
@@ -986,6 +1179,8 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
             min_window_points=min_window_points,
             logger=logger,
             filename_suffix=filename_suffix,
+            upward_only_fit=args.fit_c_upward_only,
+            reference_oommf_csv=reference_oommf_csv,
         )
         
         logger.info("")
@@ -1218,6 +1413,10 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
             )
         elif case == "c":
             # Hard-axis: characterize linear sensitivity region
+            reference_oommf_csv = args.oommf_reference_hard.resolve() if args.oommf_reference_hard else None
+            if reference_oommf_csv and not reference_oommf_csv.exists():
+                logger.info(f"  [WARNING] OOMMF reference CSV not found: {reference_oommf_csv}")
+                reference_oommf_csv = None
             plot_sensor_data_c(
                 output_file,
                 case_names[case],
@@ -1227,6 +1426,8 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
                 min_window_points=min_window_points,
                 logger=logger,
                 filename_suffix=filename_suffix,
+                upward_only_fit=args.fit_c_upward_only,
+                reference_oommf_csv=reference_oommf_csv,
             )
         plot_count += 1
 
