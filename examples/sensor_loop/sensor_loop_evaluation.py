@@ -206,43 +206,116 @@ def load_oommf_reference(csv_path: Path) -> tuple[np.ndarray, np.ndarray]:
         raise ValueError(f"Failed to load reference data from {csv_path}: {exc}") from exc
 
 
-def find_in_up_M_over_Ms_near_value(
-    data_file: Path, value=1.0, tolerance=0.05, Ms_in_A_Per_m=800e3
+def compute_saturation_field_Hs(
+    data_file: Path, saturation_threshold: float = 0.99, Ms_in_A_Per_m: float = 800e3
 ) -> tuple[float, float] | tuple[None, None]:
-    """Find applied field Hs where M/Ms crosses a target value within tolerance.
-
-    Searches through up-sweep data to locate the field strength where magnetization
-    reaches the target normalized value. Useful for identifying saturation fields,
-    remanence, and coercivity.
-
+    """Compute saturation field Hs from easy-axis hysteresis loop.
+    
+    Definition: Hs is the first field value at which magnetization reaches positive 
+    saturation (M/Ms ≥ saturation_threshold) on the increasing-H branch starting 
+    from negative saturation (M/Ms ≤ -0.99).
+    
+    Algorithm:
+    1. Identify contiguous runs where H increases monotonically
+    2. Find the first run starting from negative saturation (M/Ms ≤ -0.99)
+    3. Within that run, locate first point where M/Ms ≥ saturation_threshold
+    
     Args:
-        data_file: Path to data file containing Hext and M/Ms columns
-        value: Target M/Ms value to search for (default: 1.0 for saturation)
-        tolerance: Acceptable deviation from target value (default: 0.05)
-        Ms_in_A_Per_m: Saturation magnetization in A/m (default: 800e3 for sensor example)
-
+        data_file: Path to up-sweep data file
+        saturation_threshold: M/Ms threshold for saturation (default: 0.99)
+        Ms_in_A_Per_m: Saturation magnetization in A/m (default: 800e3)
+    
     Returns:
-        Tuple of (Hs_in_kA_Per_m, M_over_Ms_value) where crossing occurs, or (None, None) if not found
+        Tuple of (Hs_kA_per_m, M_over_Ms_at_Hs) or (None, None) if not found
     """
     data = np.loadtxt(data_file, skiprows=1)
     mu0 = 4 * np.pi * 1e-7  # Permeability of free space [T·m/A]
-
+    
     # Data columns: [0]=index, [1]=mu0*Hext(T), [2]=J·h(T)
     Hext_T = data[:, 1]  # External field [T]
     J_h_T = data[:, 2]  # Magnetization response [T]
-
-    # Convert J·h/mu0 to normalized magnetization M/Ms
+    
+    # Convert to kA/m and normalized magnetization
+    Hext_kA_per_m = Hext_T / mu0 / 1e3
     M_over_Ms = (J_h_T / mu0) / Ms_in_A_Per_m
+    
+    # Identify contiguous runs where H increases
+    H_diff = np.diff(Hext_kA_per_m)
+    run_starts = [0] + list(np.where(H_diff <= 0)[0] + 1)
+    run_starts.append(len(Hext_kA_per_m))
+    
+    # Find first run starting from negative saturation
+    for i in range(len(run_starts) - 1):
+        start_idx = run_starts[i]
+        end_idx = run_starts[i + 1]
+        
+        if end_idx - start_idx < 2:
+            continue
+        
+        # Check if run starts from negative saturation
+        if M_over_Ms[start_idx] <= -0.99:
+            # Find first point reaching saturation threshold
+            for j in range(start_idx, end_idx):
+                if M_over_Ms[j] >= saturation_threshold:
+                    return Hext_kA_per_m[j], M_over_Ms[j]
+    
+    # Fallback: search entire array for first point above threshold
+    for i, m_val in enumerate(M_over_Ms):
+        if m_val >= saturation_threshold:
+            return Hext_kA_per_m[i], m_val
+    
+    return None, None
 
-    # Find first sample where M/Ms is within tolerance of target
-    lower = value - tolerance
-    upper = value + tolerance
-    for i, m_normalized in enumerate(M_over_Ms):
-        if lower <= m_normalized <= upper:
-            Hs = Hext_T[i]
-            Hs_in_kA_Per_m = Hs / mu0 / 1e3  # Convert field to [kA/m]
-            return Hs_in_kA_Per_m, m_normalized
 
+def compute_coercivity_Hc45(
+    data_file: Path, Ms_in_A_Per_m: float = 800e3
+) -> tuple[float, float] | tuple[None, None]:
+    """Compute coercivity Hc,45° from diagonal hysteresis loop using interpolation.
+    
+    Definition: Hc,45° is the field where normalized magnetization M/Ms crosses 
+    zero in the diagonal direction on the positive H side (upward branch).
+    
+    Algorithm:
+    Uses linear interpolation between adjacent points to find exact zero crossing:
+    - H_zero = H1 + (0 - M1) * (H2 - H1) / (M2 - M1)
+    
+    Args:
+        data_file: Path to up-sweep data file
+        Ms_in_A_Per_m: Saturation magnetization in A/m (default: 800e3)
+    
+    Returns:
+        Tuple of (Hc45_kA_per_m, 0.0) or (None, None) if not found
+    """
+    data = np.loadtxt(data_file, skiprows=1)
+    mu0 = 4 * np.pi * 1e-7  # Permeability of free space [T·m/A]
+    
+    # Data columns: [0]=index, [1]=mu0*Hext(T), [2]=J·h(T)
+    Hext_T = data[:, 1]  # External field [T]
+    J_h_T = data[:, 2]  # Magnetization response [T]
+    
+    # Convert to kA/m and normalized magnetization
+    Hext_kA_per_m = Hext_T / mu0 / 1e3
+    M_over_Ms = (J_h_T / mu0) / Ms_in_A_Per_m
+    
+    # Detect sign changes (crossing zero) on positive H side
+    for i in range(len(M_over_Ms) - 1):
+        # Only consider positive H values
+        if Hext_kA_per_m[i] <= 0:
+            continue
+        
+        # Check for sign change: M1 < 0 and M2 > 0 (or vice versa)
+        if M_over_Ms[i] * M_over_Ms[i + 1] < 0:
+            # Linear interpolation to find exact zero crossing
+            H1 = Hext_kA_per_m[i]
+            H2 = Hext_kA_per_m[i + 1]
+            M1 = M_over_Ms[i]
+            M2 = M_over_Ms[i + 1]
+            
+            # H_zero = H1 + (0 - M1) * (H2 - H1) / (M2 - M1)
+            H_zero = H1 - M1 * (H2 - H1) / (M2 - M1)
+            
+            return H_zero, 0.0
+    
     return None, None
 
 
@@ -255,6 +328,7 @@ def plot_sensor_data_a(
     ylim: tuple[float, float] | None = None,
     logger: logging.Logger | None = None,
     filename_suffix: str = "",
+    reference_oommf_csv: Path | None = None,
 ) -> None:
     """Plot easy-axis hysteresis loop and highlight saturation point (M/Ms ≈ 1).
 
@@ -267,6 +341,7 @@ def plot_sensor_data_a(
         ylim: Optional (y_min, y_max) tuple for y-axis limits in M/Ms (default: -1.05, 1.05)
         logger: Optional logger instance for output
         filename_suffix: Optional suffix to append to output filename (e.g., '_hstep0.003')
+        reference_oommf_csv: Optional OOMMF reference CSV for overlay (M/Ms vs Hext)
     """
     if logger is None:
         logger = logging.getLogger("sensor_loop_evaluation")
@@ -279,8 +354,8 @@ def plot_sensor_data_a(
     Hs_in_kA_Per_m = None
     M_over_Ms_value = None
     if original_data_file.is_file():
-        Hs_in_kA_Per_m, M_over_Ms_value = find_in_up_M_over_Ms_near_value(
-            original_data_file, value=1.0, tolerance=0.05, Ms_in_A_Per_m=Ms_in_A_Per_m
+        Hs_in_kA_Per_m, M_over_Ms_value = compute_saturation_field_Hs(
+            original_data_file, saturation_threshold=0.99, Ms_in_A_Per_m=Ms_in_A_Per_m
         )
         if Hs_in_kA_Per_m is not None:
             Hs_A_per_m = Hs_in_kA_Per_m * 1000.0
@@ -307,6 +382,27 @@ def plot_sensor_data_a(
 
     # Generate plot
     plt.figure(figsize=(10, 6))
+    
+    # Optional overlay: OOMMF benchmark reference M/Ms vs Hext
+    if reference_oommf_csv is not None:
+        try:
+            logger.info(f"  [REFERENCE] Loading OOMMF reference from: {reference_oommf_csv.name}")
+            ref_H_kA_per_m, ref_M_over_Ms = load_oommf_reference(reference_oommf_csv)
+            plt.plot(
+                ref_H_kA_per_m,
+                ref_M_over_Ms,
+                color="k",
+                linestyle="-",
+                linewidth=1.4,
+                marker="*",
+                markersize=7,
+                alpha=0.4,
+                label="OOMMF reference M/Ms",
+            )
+            logger.info(f"  [REFERENCE] Successfully plotted OOMMF reference overlay")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.info(f"  [WARNING] Failed to load OOMMF reference: {exc}")
+    
     plt.plot(Hext_kA_per_m, M_over_Ms, "C0-", linewidth=1.5, label="Hysteresis loop")
     plt.plot(Hext_kA_per_m, M_over_Ms, "C0+", markersize=4, alpha=0.6, label="Data points")
 
@@ -350,6 +446,7 @@ def plot_sensor_data_b(
     ylim: tuple[float, float] | None = None,
     logger: logging.Logger | None = None,
     filename_suffix: str = "",
+    reference_oommf_csv: Path | None = None,
 ) -> None:
     """Plot 45-degree hysteresis loop and highlight coercivity point (M/Ms = 0).
 
@@ -362,6 +459,7 @@ def plot_sensor_data_b(
         ylim: Optional (y_min, y_max) tuple for y-axis limits in M/Ms (default: -1.05, 1.05)
         logger: Optional logger instance for output
         filename_suffix: Optional suffix to append to output filename (e.g., '_hstep0.003')
+        reference_oommf_csv: Optional OOMMF reference CSV for overlay (M/Ms vs Hext)
     """
     if logger is None:
         logger = logging.getLogger("sensor_loop_evaluation")
@@ -370,12 +468,12 @@ def plot_sensor_data_b(
     data = np.loadtxt(data_file, skiprows=1)
     Ms_in_A_Per_m = 800e3  # A/m
 
-    # Detect coercivity (field at M/Ms = 0) in up-sweep
+    # Detect coercivity (field at M/Ms = 0) in up-sweep on positive H branch
     Hc45_in_kA_Per_m = None
     M_over_Ms_value = None
     if original_data_file.is_file():
-        Hc45_in_kA_Per_m, M_over_Ms_value = find_in_up_M_over_Ms_near_value(
-            original_data_file, value=0.0, tolerance=0.05, Ms_in_A_Per_m=Ms_in_A_Per_m
+        Hc45_in_kA_Per_m, M_over_Ms_value = compute_coercivity_Hc45(
+            original_data_file, Ms_in_A_Per_m=Ms_in_A_Per_m
         )
         if Hc45_in_kA_Per_m is not None:
             Hc45_A_per_m = Hc45_in_kA_Per_m * 1000.0
@@ -401,6 +499,27 @@ def plot_sensor_data_b(
 
     # Generate plot
     plt.figure(figsize=(10, 6))
+    
+    # Optional overlay: OOMMF benchmark reference M/Ms vs Hext
+    if reference_oommf_csv is not None:
+        try:
+            logger.info(f"  [REFERENCE] Loading OOMMF reference from: {reference_oommf_csv.name}")
+            ref_H_kA_per_m, ref_M_over_Ms = load_oommf_reference(reference_oommf_csv)
+            plt.plot(
+                ref_H_kA_per_m,
+                ref_M_over_Ms,
+                color="k",
+                linestyle="-",
+                linewidth=1.4,
+                marker="*",
+                markersize=7,
+                alpha=0.4,
+                label="OOMMF reference M/Ms",
+            )
+            logger.info(f"  [REFERENCE] Successfully plotted OOMMF reference overlay")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.info(f"  [WARNING] Failed to load OOMMF reference: {exc}")
+    
     plt.plot(Hext_kA_per_m, M_over_Ms, "C0-", linewidth=1.5, label="Hysteresis loop")
     plt.plot(Hext_kA_per_m, M_over_Ms, "C0+", markersize=4, alpha=0.6, label="Data points")
 
@@ -722,11 +841,11 @@ def plot_sensor_data_c(
                 ref_H_kA_per_m,
                 ref_M_over_Ms,
                 color="k",
-                linestyle="",
+                linestyle="-",
                 linewidth=1.4,
                 marker="*",
                 markersize=7,
-                alpha=0.65,
+                alpha=0.4,
                 label="OOMMF reference M/Ms",
             )
             logger.info(f"  [REFERENCE] Successfully plotted OOMMF reference overlay")
@@ -935,10 +1054,10 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
         help="Up-sweep-only data file for saturation detection (default: same as --plot-a)",
     )
     parser.add_argument(
-        "--oommf-reference-hard",
+        "--oommf-reference",
         type=Path,
         metavar="FILE",
-        help="Optional OOMMF reference CSV for hard-axis overlay (M/Ms vs Hext)",
+        help="Optional OOMMF reference CSV for overlay on all cases (M/Ms vs Hext)",
     )
     parser.add_argument(
         "--cases",
@@ -999,6 +1118,12 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
         # Determine reference file for saturation detection
         reference_file = args.reference_file if args.reference_file else data_file
         
+        # Determine OOMMF reference CSV for overlay
+        reference_oommf_csv = args.oommf_reference.resolve() if args.oommf_reference else None
+        if reference_oommf_csv and not reference_oommf_csv.exists():
+            logger.info(f"[WARNING] OOMMF reference CSV not found: {reference_oommf_csv}")
+            reference_oommf_csv = None
+        
         logger.info("=" * 80)
         logger.info("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case a)")
         logger.info("=" * 80)
@@ -1032,6 +1157,7 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
             xlim=plot_xlim,
             logger=logger,
             filename_suffix=filename_suffix,
+            reference_oommf_csv=reference_oommf_csv,
         )
         
         logger.info("")
@@ -1066,6 +1192,12 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
         # Determine reference file for coercivity detection
         reference_file = args.reference_file if args.reference_file else data_file
         
+        # Determine OOMMF reference CSV for overlay
+        reference_oommf_csv = args.oommf_reference.resolve() if args.oommf_reference else None
+        if reference_oommf_csv and not reference_oommf_csv.exists():
+            logger.info(f"[WARNING] OOMMF reference CSV not found: {reference_oommf_csv}")
+            reference_oommf_csv = None
+        
         logger.info("=" * 80)
         logger.info("SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case b)")
         logger.info("=" * 80)
@@ -1099,6 +1231,7 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
             xlim=plot_xlim,
             logger=logger,
             filename_suffix=filename_suffix,
+            reference_oommf_csv=reference_oommf_csv,
         )
         
         logger.info("")
@@ -1137,7 +1270,7 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
         window_half_width = 2.5  # Fixed benchmark window for sensitivities
         min_window_points = 5  # Minimum points needed in linear window
 
-        reference_oommf_csv = args.oommf_reference_hard.resolve() if args.oommf_reference_hard else None
+        reference_oommf_csv = args.oommf_reference.resolve() if args.oommf_reference else None
         if reference_oommf_csv and not reference_oommf_csv.exists():
             logger.info(f"[WARNING] OOMMF reference CSV not found: {reference_oommf_csv}")
             reference_oommf_csv = None
@@ -1390,6 +1523,10 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
         if case == "a":
             # Easy-axis: look for saturation
             original_data = sensor_loop_dir / "sensor_case-a_up/sensor.dat"
+            reference_oommf_csv = args.oommf_reference.resolve() if args.oommf_reference else None
+            if reference_oommf_csv and not reference_oommf_csv.exists():
+                logger.info(f"  [WARNING] OOMMF reference CSV not found: {reference_oommf_csv}")
+                reference_oommf_csv = None
             plot_sensor_data_a(
                 output_file,
                 case_names[case],
@@ -1398,10 +1535,15 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
                 xlim=plot_xlim,
                 logger=logger,
                 filename_suffix=filename_suffix,
+                reference_oommf_csv=reference_oommf_csv,
             )
         elif case == "b":
             # 45-degree: look for coercivity
             original_data = sensor_loop_dir / "sensor_case-b_up/sensor.dat"
+            reference_oommf_csv = args.oommf_reference.resolve() if args.oommf_reference else None
+            if reference_oommf_csv and not reference_oommf_csv.exists():
+                logger.info(f"  [WARNING] OOMMF reference CSV not found: {reference_oommf_csv}")
+                reference_oommf_csv = None
             plot_sensor_data_b(
                 output_file,
                 case_names[case],
@@ -1410,10 +1552,11 @@ Note: auto-concatenation only happens in the full pipeline (no --plot-* flags).
                 xlim=plot_xlim,
                 logger=logger,
                 filename_suffix=filename_suffix,
+                reference_oommf_csv=reference_oommf_csv,
             )
         elif case == "c":
             # Hard-axis: characterize linear sensitivity region
-            reference_oommf_csv = args.oommf_reference_hard.resolve() if args.oommf_reference_hard else None
+            reference_oommf_csv = args.oommf_reference.resolve() if args.oommf_reference else None
             if reference_oommf_csv and not reference_oommf_csv.exists():
                 logger.info(f"  [WARNING] OOMMF reference CSV not found: {reference_oommf_csv}")
                 reference_oommf_csv = None

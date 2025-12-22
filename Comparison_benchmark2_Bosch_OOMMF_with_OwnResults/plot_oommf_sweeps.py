@@ -50,7 +50,18 @@ def read_and_split(csv_path):
             m_T = row.get("mParallel")
             if b_mT is None or m_T is None:
                 raise KeyError("CSV must contain columns 'axis', 'bParallel_mT', and 'mParallel'.")
-            sets[axis].append((float(b_mT), float(m_T)))
+            
+            # Read normalized magnetization components (Mx/Ms, My/Ms, Mz/Ms)
+            mx_norm = row.get("mX")
+            my_norm = row.get("mY")
+            mz_norm = row.get("mZ")
+            
+            row_data = [float(b_mT), float(m_T)]
+            if mx_norm is not None and my_norm is not None and mz_norm is not None:
+                # Store normalized components (will be converted to A/m later)
+                row_data.extend([float(mx_norm), float(my_norm), float(mz_norm)])
+            
+            sets[axis].append(tuple(row_data))
     return sets
 
 
@@ -60,18 +71,38 @@ def convert_and_prepare(sets, ms_apm=800000.0):
     for name, rows in sets.items():
         x_apm = []
         y_m_norm = []
-        for b_mT, m_T in rows:
+        mx_apm = []
+        my_apm = []
+        mz_apm = []
+        has_components = len(rows[0]) > 2 if rows else False
+        
+        for row_data in rows:
+            b_mT, m_T = row_data[0], row_data[1]
             b_T = b_mT / 1000.0
             h_apm = b_T / mu0
             m_apm = m_T / mu0
             m_norm = m_apm / ms_apm
             x_apm.append(h_apm)
             y_m_norm.append(m_norm)
+            
+            # Convert normalized components (Mx/Ms, My/Ms, Mz/Ms) to A/m
+            if has_components and len(row_data) >= 5:
+                mx_norm, my_norm, mz_norm = row_data[2], row_data[3], row_data[4]
+                mx_apm.append(mx_norm * ms_apm)  # Convert normalized to A/m
+                my_apm.append(my_norm * ms_apm)
+                mz_apm.append(mz_norm * ms_apm)
+        
         prepared[name] = {
             "H_A_per_m": x_apm,
             "M_A_per_m": [val * ms_apm for val in y_m_norm],
             "M_over_Ms": y_m_norm,
         }
+        
+        if has_components and mx_apm:
+            prepared[name]["Mx_A_per_m"] = mx_apm
+            prepared[name]["My_A_per_m"] = my_apm
+            prepared[name]["Mz_A_per_m"] = mz_apm
+    
     return prepared
 
 
@@ -539,6 +570,80 @@ def write_metadata(prepared, out_dir, source_path, ms_apm, benchmark_params=None
             json.dump(meta, mf, indent=2)
 
 
+def plot_dual_axis_with_components(prepared, out_dir, ms_apm):
+    """
+    Create 3 separate plots (one for each dataset: easy, diagonal, hard).
+    Each plot shows:
+    - Left y-axis: M/Ms (normalized magnetization)
+    - Right y-axis: M total and all components (Mx, My, Mz) in A/m
+    """
+    fontsize = 8
+    matplotlib.rcParams.update({'font.size': fontsize})
+    
+    for name, data in prepared.items():
+        fig, ax1 = plt.subplots(figsize=(15/2.54, 12/2.54))
+        
+        # Plot M/Ms on left axis
+        line1 = ax1.plot(data["H_A_per_m"], data["M_over_Ms"], 
+                         label='M/Ms', linestyle='-', linewidth=2.0, color='black')
+        
+        ax1.set_xlabel("H (A/m)")
+        ax1.set_ylabel("M/Ms (1)", color='black')
+        ax1.tick_params(axis='y', labelcolor='black')
+        ax1.set_ylim(-1.05, 1.05)
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot M and components on right axis
+        ax2 = ax1.twinx()
+        
+        # Plot total M (projection on applied field)
+        line2 = ax2.plot(data["H_A_per_m"], data["M_A_per_m"], 
+                        label='M∥ (total)', linestyle='-', linewidth=1.5, 
+                        color='blue', alpha=0.8)
+        
+        lines = line1 + line2
+        
+        # Plot components if available
+        has_components = "Mx_A_per_m" in data
+        if has_components:
+            line3 = ax2.plot(data["H_A_per_m"], data["Mx_A_per_m"], 
+                            label='Mx', linestyle='--', linewidth=1.2, 
+                            color='red', alpha=0.7)
+            line4 = ax2.plot(data["H_A_per_m"], data["My_A_per_m"], 
+                            label='My', linestyle='--', linewidth=1.2, 
+                            color='green', alpha=0.7)
+            line5 = ax2.plot(data["H_A_per_m"], data["Mz_A_per_m"], 
+                            label='Mz', linestyle='--', linewidth=1.2, 
+                            color='orange', alpha=0.7)
+            lines = lines + line3 + line4 + line5
+        
+        ax2.set_ylabel("M (A/m)", color='blue')
+        ax2.tick_params(axis='y', labelcolor='blue')
+        
+        # Scale right axis to match left axis
+        y1_min, y1_max = ax1.get_ylim()
+        ax2.set_ylim(y1_min * ms_apm, y1_max * ms_apm)
+        
+        # Combined legend
+        labels = [l.get_label() for l in lines]
+        ax1.legend(lines, labels, loc='best', fontsize=fontsize, framealpha=0.9)
+        
+        # Add title
+        axis_label = {"easy": "case a", "diagonal": "case b", "hard": "case c"}.get(name, name)
+        fig.suptitle(f"MaMMoS Benchmark: {name} axis ({axis_label})", fontsize=fontsize+1)
+        
+        fig.tight_layout()
+        
+        # Save with descriptive name
+        base_name = f"oommf_sweeps_{name}_axis_M_components_vs_H"
+        png_path = Path(out_dir) / f"{base_name}.png"
+        svg_path = Path(out_dir) / f"{base_name}.svg"
+        fig.savefig(png_path, dpi=300)
+        fig.savefig(svg_path)
+        plt.close(fig)
+        print(f"Component plot for {name} axis saved to: {png_path}")
+
+
 def plot_sets(prepared, out_dir, output=None, benchmark_params=None, ms_apm=None):
     fig, ax = plt.subplots(figsize=(15/2.54, 12/2.54))  # size in inches
     fontsize = 8
@@ -557,7 +662,7 @@ def plot_sets(prepared, out_dir, output=None, benchmark_params=None, ms_apm=None
             m_at_hs = benchmark_params['Hs']['M_at_Hs']
             ax.plot(hs_val, m_at_hs, 'o', markersize=8, markerfacecolor='none', 
                     markeredgecolor='darkred', markeredgewidth=1.5, 
-                    label=f'Hs = {hs_val:.0f} A/m', zorder=5)
+                    label=f'Hs = {hs_val:.4g} A/m', zorder=5)
         
         # Mark Hc,45° on diagonal axis
         if 'Hc_45' in benchmark_params and 'diagonal' in prepared:
@@ -566,7 +671,7 @@ def plot_sets(prepared, out_dir, output=None, benchmark_params=None, ms_apm=None
                 # M/Ms should be ~0 at coercivity
                 ax.plot(hc45, 0, 'o', markersize=8, markerfacecolor='none', 
                     markeredgecolor='darkblue', markeredgewidth=1.5, 
-                    label=f'Hc,45° = {hc45:.0f} A/m', zorder=5)
+                    label=f'Hc,45° = {hc45:.4g} A/m', zorder=5)
                 # Also mark the negative crossing if it exists
                 crossings = benchmark_params['Hc_45']['H_crossings']
                 if len(crossings) > 1:
@@ -599,7 +704,7 @@ def plot_sets(prepared, out_dir, output=None, benchmark_params=None, ms_apm=None
                         linestyle='--',
                         color='black',
                         linewidth=1.5,
-                        label=f"hard-axis fit \n(±{window_kApm:.1f} kA/m):\n slope (dM/dH)=\n{a:.3e} \n (A/m)/(A/m)"  #  (dM/dH): in (A/m)/(A/m)
+                        label=f"hard-axis fit \n(±{window_kApm:.4g} kA/m):\n slope (dM/dH)=\n{a:.4g} \n (A/m)/(A/m)"  #  (dM/dH): in (A/m)/(A/m)
                     )
 
         # Plot G(H) for hard axis on a twin y-axis if available
@@ -716,18 +821,18 @@ def main():
     log_print("\n=== Benchmark Parameters ===")
     if 'Hs' in benchmark_params:
         log_print("Saturation field (reset field, easy axis):")
-        log_print(f"  Hs = {benchmark_params['Hs']['Hs']:.2f} A/m")
-        log_print(f"  M/Ms at Hs = {benchmark_params['Hs']['M_at_Hs']:.4f}")
+        log_print(f"  Hs = {benchmark_params['Hs']['Hs']:.4g} A/m")
+        log_print(f"  M/Ms at Hs = {benchmark_params['Hs']['M_at_Hs']:.4g}")
     
     if 'Hc_45' in benchmark_params:
         log_print("\nCoercivity at 45° (diagonal axis):")
         hc45 = benchmark_params['Hc_45']['Hc_45']
         if hc45 is not None:
-            log_print(f"  Hc,45° = {hc45:.2f} A/m")
+            log_print(f"  Hc,45° = {hc45:.4g} A/m")
         else:
             log_print("  Hc,45° = Could not determine (no zero crossing found)")
         if benchmark_params['Hc_45']['H_crossings']:
-            log_print(f"  All zero crossings: {[f'{h:.2f}' for h in benchmark_params['Hc_45']['H_crossings']]}")
+            log_print(f"  All zero crossings: {[f'{h:.4g}' for h in benchmark_params['Hc_45']['H_crossings']]}")
 
     if 'hard_axis' in benchmark_params:
         log_print("\nHard-axis sensitivity (sweep c):")
@@ -740,9 +845,9 @@ def main():
         if ms and ms.get('slope') is not None:
             Hmin, Hmax = ms['H_window']
             log_print("\n  Magnetic sensitivity:")
-            log_print(f"    Fit window: H ∈ [{Hmin:.0f}, {Hmax:.0f}] A/m")
-            log_print(f"    Slope (dM/dH): {ms['slope']:.6e} (A/m)/(A/m)")
-            log_print(f"    Intercept: {ms['intercept']:.6e} A/m")
+            log_print(f"    Fit window: H ∈ [{Hmin:.4g}, {Hmax:.4g}] A/m")
+            log_print(f"    Slope (dM/dH): {ms['slope']:.4g} (A/m)/(A/m)")
+            log_print(f"    Intercept: {ms['intercept']:.4g} A/m")
             log_print(f"    Points used: {ms['num_points']}")
         else:
             log_print("\n  Magnetic sensitivity: insufficient points in window")
@@ -750,17 +855,17 @@ def main():
         # Electrical model and sensitivity section
         if em:
             log_print("\n  Electrical model (Slonczewski MTJ):")
-            log_print(f"    P² (spin polarization): {em['P2']:.4f}")
-            log_print(f"    Rmin: {em['Rmin_Ohm']:.2f} Ω")
-            log_print(f"    G₀: {em['G0_S']*1e3:.3f} mS")
+            log_print(f"    P² (spin polarization): {em['P2']:.4g}")
+            log_print(f"    Rmin: {em['Rmin_Ohm']:.4g} Ω")
+            log_print(f"    G₀: {em['G0_S']*1e3:.4g} mS")
         if es and es.get('slope') is not None:
-            log_print(f"    Slope (dG/dH): {es['slope']:.6e} S/(A/m)")
-            log_print(f"    Intercept: {es['intercept']:.6e} S")
+            log_print(f"    Slope (dG/dH): {es['slope']:.4g} S/(A/m)")
+            log_print(f"    Intercept: {es['intercept']:.4g} S")
         
         # Non-linearity section
         if nl and 'max_abs_residual' in nl and nl['max_abs_residual'] is not None:
             log_print("\n  Non-linearity:")
-            log_print(f"    Max residual: {nl['max_abs_residual']:.6e} A/m")
+            log_print(f"    Max residual: {nl['max_abs_residual']:.4g} A/m")
         else:
             log_print("\n  Non-linearity: unavailable")
     log_print("===========================\n")
@@ -790,6 +895,9 @@ def main():
     write_metadata(prepared, out_dir, source_path=input_path, ms_apm=args.Ms, 
                    benchmark_params=benchmark_params)
     plot_sets(prepared, out_dir, output=args.output, benchmark_params=benchmark_params, ms_apm=args.Ms)
+    
+    # Create component plots (one for each dataset)
+    plot_dual_axis_with_components(prepared, out_dir, ms_apm=args.Ms)
 
 
 if __name__ == "__main__":
