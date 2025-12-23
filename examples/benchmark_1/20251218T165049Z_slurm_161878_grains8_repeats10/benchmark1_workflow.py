@@ -1534,7 +1534,7 @@ def step4_repeat_and_average(
                 # Prepare mammos-entity objects for CSV export
                 description = (
                     "Averaged extrinsic properties for Benchmark 1.\n"
-                    "This file contains Hc (coercivity), Jr (remanent polarization), and BHmax (maximum energy product)\n"
+                    "This file contains Hc (coercivity), Mr (remanent magnetization), and BHmax (maximum energy product)\n"
                     "computed from the averaged hysteresis loop.\n"
                 )
                 # Only include non-None values
