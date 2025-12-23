@@ -1,3 +1,10 @@
+from __future__ import annotations
+import sys
+import argparse
+from pathlib import Path
+from typing import Tuple, List, Dict, Optional, Union
+import numpy as np
+from scipy.spatial import Delaunay
 #!/usr/bin/env python3
 """
 Single-solid tetra mesher with selectable geometry and backend:
@@ -27,15 +34,8 @@ Dependencies:
 - Grid backend works without meshpy; visualization still needs meshio.
 """
 
-from __future__ import annotations
-import argparse
-from pathlib import Path
-from typing import Tuple, List, Dict, Optional, Union
-import numpy as np
-from scipy.spatial import Delaunay
-import os
-import sys
-import shutil
+
+
 
 # Optional: visualization
 try:
@@ -482,7 +482,7 @@ def mesh_backend_meshpy_elliptic_cylinder(
     opts.regionattrib = True
     opts.verbose = bool(verbose)
 
-    mesh = tet_build(
+    tet_build(
         mi,
         options=opts,
         attributes=True,
@@ -490,9 +490,7 @@ def mesh_backend_meshpy_elliptic_cylinder(
         verbose=bool(verbose),
     )
 
-    knt = np.asarray(mesh.points, dtype=np.float64)
-    tets = np.asarray(mesh.elements, dtype=np.int32)
-    ijk = np.hstack([tets, np.ones((tets.shape[0], 1), dtype=np.int32)])
+
 
 
 '''
@@ -1194,7 +1192,7 @@ def run_single_solid_mesher(
     if backend not in ("meshpy", "grid"):
         raise ValueError("backend must be 'meshpy' or 'grid'")
     # Prefer meshpy when it is available, unless the caller set force_grid=True
-    effective_backend = backend
+
 
     if geom == "box":
         if backend == "meshpy":
@@ -1344,7 +1342,7 @@ def run_single_solid_mesher(
 
 
 def mesh_backend_neper_poly(n: int, seed: int, size_x: float, size_y: float, size_z: float, h: float):
-    import subprocess, sys
+    import subprocess
     # 1) Generate tessellation
     cmd_tess = ["neper", "-T", "-n", str(n), "-id", str(seed),
                 "-morpho", "gg",
@@ -1418,7 +1416,6 @@ def mesh_backend_neper_poly(n: int, seed: int, size_x: float, size_y: float, siz
     subprocess.run(cmd_vis, check=True)
 
     # 2) Mesh tessellation
-    gmsh_path = find_gmsh_path()
     cmd_mesh = ["neper", "-M",  f"n{n}-id{seed}.tess",
                 "-cl", f"{h}", "-format", "vtk"]
     subprocess.run(cmd_mesh, check=True)
