@@ -42,14 +42,16 @@ import shutil
 import sys
 from pathlib import Path
 from typing import List, Optional
-import ast
-
-# Module-level overlay options (set in main via CLI)
-OVERLAY_OOMMF_EASY_FILE: Optional[Path] = None
-OVERLAY_OOMMF_MS: Optional[float] = None
 
 import matplotlib.pyplot as plt
 import numpy as np
+try:
+    import mammos_analysis
+    import mammos_entity as me
+    import mammos_units as u  # noqa: F401 (units may be useful later)
+    _MAMMOS_ANALYSIS_AVAILABLE = True
+except Exception:
+    _MAMMOS_ANALYSIS_AVAILABLE = False
 
 # TODO: Add logging instead of print statements for better control over output verbosity.
 #      For now, print statements are used for simplicity and clarity.
@@ -378,36 +380,6 @@ def step3b_run_loop_up(base: Path, benchmark_dir: Path, num_loops: int = 1) -> N
 # PLOTTING UTILITIES
 # =============================================================================
 
-def _read_oommf_easy_processed_csv(csv_path: Path):
-    """Read OOMMF processed 'easy' CSV produced by plot_oommf_sweeps.py.
-
-    Returns dict with keys 'H_A_per_m', 'M_over_Ms'.
-    The file format stores full arrays in a single CSV row as stringified lists.
-    """
-    non_comment_lines = []
-    with open(csv_path, 'r') as f:
-        for line in f:
-            if line.strip().startswith('#'):
-                continue
-            non_comment_lines.append(line)
-    import csv as _csv
-    reader = _csv.reader(non_comment_lines)
-    data_row = None
-    for row in reader:
-        if not row:
-            continue
-        if len(row) >= 3 and row[0].strip().startswith('[') and row[2].strip().startswith('['):
-            data_row = row
-            break
-    if data_row is None:
-        raise ValueError(f"No data row found in {csv_path}")
-    H_list = ast.literal_eval(data_row[0])
-    M_over_Ms_list = ast.literal_eval(data_row[2])
-    return {
-        'H_A_per_m': H_list,
-        'M_over_Ms': M_over_Ms_list,
-    }
-
 def plot_hysteresis_loop(
     data_file: Path, 
     output_file: Path, 
@@ -418,6 +390,8 @@ def plot_hysteresis_loop(
     extent: Optional[str] = None,
     num_down: Optional[int] = None,
     num_up: Optional[int] = None,
+    hc_A_per_m: Optional[float] = None,
+    jr_T: Optional[float] = None,
 ) -> None:
     """Plot hysteresis loop from .dat file.
     
@@ -455,21 +429,6 @@ def plot_hysteresis_loop(
         
         # Create plot with secondary axes (bottom: Tesla, top: kA/m)
         fig, ax_left = plt.subplots(figsize=(10, 6))
-
-        # Optional overlay: OOMMF easy-axis processed CSV (matches 'easy-axis' plot)
-        try:
-            if OVERLAY_OOMMF_EASY_FILE is not None:
-                easy = _read_oommf_easy_processed_csv(OVERLAY_OOMMF_EASY_FILE)
-                ms_val = OVERLAY_OOMMF_MS if (OVERLAY_OOMMF_MS is not None and OVERLAY_OOMMF_MS > 0) else 800000.0
-                H_oommf_T = mu0 * np.array(easy['H_A_per_m'], dtype=float)
-                M_oommf_kApm = (np.array(easy['M_over_Ms'], dtype=float) * ms_val) / 1e3
-                ax_left.plot(
-                    H_oommf_T, M_oommf_kApm,
-                    color='red', linestyle='--', linewidth=1.5,
-                    label='OOMMF easy-axis'
-                )
-        except Exception as e:
-            print(f"[WARNING] Failed to overlay OOMMF easy-axis: {e}", file=sys.stderr)
 
         # Track plot handles and labels for separate legends
         individual_handles = []
@@ -534,10 +493,10 @@ def plot_hysteresis_loop(
 
         if has_down and has_up:
             # Build legend labels with optional run counts
-            down_label = "Average down-ward path of hysteresis loop"
+            down_label = "Average down-ward path \nof hysteresis loop"
             if num_down is not None and num_down > 0:
                 down_label += f" (n={num_down})"
-            up_label = "Average up-ward path of hysteresis loop"
+            up_label = "Average up-ward path \nof hysteresis loop"
             if num_up is not None and num_up > 0:
                 up_label += f" (n={num_up})"
             
@@ -629,6 +588,39 @@ def plot_hysteresis_loop(
         title = f"Averaged Hysteresis Loop{title_suffix}"
         ax_left.set_title(title, fontsize=12, fontweight="bold")
         
+        # Optional: Mark coercivity Hc with a hollow circle at M=0
+        if hc_A_per_m is not None:
+            try:
+                hc_T = -hc_A_per_m * mu0  # H = -Hc on bottom axis (Tesla)
+                hc_handle = ax_left.scatter(
+                    [hc_T], [0.0],
+                    marker='o', facecolors='none', edgecolors='C1',
+                    s=80, linewidths=1.5, zorder=5,
+                )
+                averaged_handles.append(hc_handle)
+                # Format Hc with 4 significant digits in kA/m
+                hc_kA_per_m = hc_A_per_m / 1e3
+                hc_label = f"Hc = {hc_kA_per_m:.4g} kA/m"
+                averaged_labels.append(hc_label)
+            except Exception as e:
+                print(f"[WARNING] Could not plot Hc marker: {e}", file=sys.stderr)
+        
+        # Optional: Mark remanent polarization Jr with a hollow square at H=0
+        if jr_T is not None:
+            try:
+                jr_kA_per_m = jr_T / mu0 / 1e3  # Convert Jr from T to kA/m for left y-axis
+                jr_handle = ax_left.scatter(
+                    [0.0], [jr_kA_per_m],
+                    marker='s', facecolors='none', edgecolors='C1',
+                    s=80, linewidths=1.5, zorder=5,
+                )
+                averaged_handles.append(jr_handle)
+                # Format Jr with 4 significant digits
+                jr_label = f"Jr = {jr_T:.4g} T"
+                averaged_labels.append(jr_label)
+            except Exception as e:
+                print(f"[WARNING] Could not plot Jr marker: {e}", file=sys.stderr)
+
         # Create two separate legends: one for averaged curves (top left), one for individual runs (bottom right)
         if averaged_handles:
             legend1 = ax_left.legend(averaged_handles, averaged_labels, loc="upper left", fontsize=10, framealpha=0.9)
@@ -650,6 +642,335 @@ def plot_hysteresis_loop(
 
 
 # =============================================================================
+# HC (COERCIVITY) COMPUTATION VIA mammos-analysis
+# =============================================================================
+
+def compute_hc_from_dat(dat_path: Path, demag: Optional[float] = None) -> Optional[float]:
+    """Compute coercivity Hc (A/m) using mammos-analysis from a hysteresis .dat file.
+
+    The definition used: The magnetic field −Hc at which magnetic polarization
+    vanishes is the coercivity Hc in units of A/m.
+
+    Inputs expected from .dat file:
+    - Column 1: µ0 Hext (Tesla)
+    - Column 2: J·h (Tesla)
+
+    We convert to A/m using µ0: H = (µ0 Hext)/µ0, M = J/µ0.
+
+    Args:
+        dat_path: Path to hysteresis .dat file (with header on first line).
+        demag: Optional demagnetization coefficient (e.g., 1/3 for a cube).
+
+    Returns:
+        Hc value in A/m (float) if successful, else None.
+    """
+    try:
+        if not _MAMMOS_ANALYSIS_AVAILABLE:
+            print(
+                "[ERROR] mammos-analysis not available. Install dependencies: "
+                "pip install mammos-analysis mammos-entity mammos-units",
+                file=sys.stderr,
+            )
+            return None
+
+        data = np.loadtxt(dat_path, skiprows=1)
+        mu0 = 4 * np.pi * 1e-7
+        Hext_T = data[:, 1]
+        J_h_T = data[:, 2]
+
+        H_A_per_m = Hext_T / mu0
+        M_A_per_m = J_h_T / mu0
+
+        # Pass plain Python lists to mammos-entity as requested
+        H_entity = me.H(list(H_A_per_m))
+        M_entity = me.M(list(M_A_per_m))
+
+        extrinsic = mammos_analysis.hysteresis.extrinsic_properties(
+            H=H_entity,
+            M=M_entity,
+            demagnetization_coefficient=demag,
+        )
+        # Robust numeric extraction in A/m from quantity
+        def _to_scalar_A_per_m(hc_obj) -> Optional[float]:
+            try:
+                return float(hc_obj.q.m)  # pint-like magnitude
+            except Exception:
+                pass
+            try:
+                return float(getattr(hc_obj.q, "magnitude"))
+            except Exception:
+                pass
+            try:
+                return float(getattr(hc_obj.q, "value"))
+            except Exception:
+                pass
+            try:
+                # astropy-like
+                return float(hc_obj.q.to_value(u.A / u.m))
+            except Exception:
+                pass
+            try:
+                return float(getattr(hc_obj, "m"))
+            except Exception:
+                pass
+            try:
+                return float(getattr(hc_obj, "magnitude"))
+            except Exception:
+                pass
+            try:
+                return float(getattr(hc_obj, "value"))
+            except Exception:
+                pass
+            return None
+
+        hc_val = _to_scalar_A_per_m(extrinsic.Hc)
+        return hc_val
+    except Exception as e:
+        print(f"[ERROR] ✗ Failed to compute Hc with mammos-analysis: {e}", file=sys.stderr)
+        return None
+
+
+def compute_hc_from_arrays(
+    Hext_T: np.ndarray,
+    J_T: np.ndarray,
+    demag: Optional[float] = None,
+) -> Optional[float]:
+    """Compute coercivity Hc (A/m) from arrays µ0Hext (T) and J (T).
+
+    This avoids any file I/O by taking the averaged data directly.
+    """
+    try:
+        if not _MAMMOS_ANALYSIS_AVAILABLE:
+            print(
+                "[ERROR] mammos-analysis not available. Install dependencies: "
+                "pip install mammos-analysis mammos-entity mammos-units",
+                file=sys.stderr,
+            )
+            return None
+
+        mu0 = 4 * np.pi * 1e-7
+        H_A_per_m = Hext_T / mu0
+        M_A_per_m = J_T / mu0
+
+        # Pass plain Python lists to mammos-entity as requested
+        H_entity = me.H(list(H_A_per_m))
+        M_entity = me.M(list(M_A_per_m))
+
+        extrinsic = mammos_analysis.hysteresis.extrinsic_properties(
+            H=H_entity,
+            M=M_entity,
+            demagnetization_coefficient=demag,
+        )
+        # Robust numeric extraction in A/m from quantity
+        try:
+            return float(extrinsic.Hc.q.m)
+        except Exception:
+            pass
+        try:
+            return float(getattr(extrinsic.Hc.q, "magnitude"))
+        except Exception:
+            pass
+        try:
+            return float(getattr(extrinsic.Hc.q, "value"))
+        except Exception:
+            pass
+        try:
+            return float(extrinsic.Hc.q.to_value(u.A / u.m))
+        except Exception:
+            pass
+        try:
+            return float(getattr(extrinsic.Hc, "m"))
+        except Exception:
+            pass
+        try:
+            return float(getattr(extrinsic.Hc, "magnitude"))
+        except Exception:
+            pass
+        try:
+            return float(getattr(extrinsic.Hc, "value"))
+        except Exception:
+            pass
+        return None
+    except Exception as e:
+        print(f"[ERROR] ✗ Failed to compute Hc with mammos-analysis: {e}", file=sys.stderr)
+        return None
+
+
+def compute_jr_from_arrays(
+    Hext_T: np.ndarray,
+    J_T: np.ndarray,
+    demag: Optional[float] = None,
+) -> Optional[float]:
+    """Compute remanent polarization Jr (Tesla) from arrays µ0Hext (T) and J (T).
+
+    Definition: remanent polarization Jr in Tesla is the intersection point of the
+    hysteresis curve with the vertical axis (at H=0).
+    """
+    try:
+        if not _MAMMOS_ANALYSIS_AVAILABLE:
+            print(
+                "[ERROR] mammos-analysis not available. Install dependencies: "
+                "pip install mammos-analysis mammos-entity mammos-units",
+                file=sys.stderr,
+            )
+            return None
+
+        mu0 = 4 * np.pi * 1e-7
+        H_A_per_m = Hext_T / mu0
+        M_A_per_m = J_T / mu0
+
+        # Pass plain Python lists to mammos-entity as requested
+        H_entity = me.H(list(H_A_per_m))
+        M_entity = me.M(list(M_A_per_m))
+
+        extrinsic = mammos_analysis.hysteresis.extrinsic_properties(
+            H=H_entity,
+            M=M_entity,
+            demagnetization_coefficient=demag,
+        )
+        
+        # Check available attributes
+        available_attrs = dir(extrinsic)
+        
+        # Try common names for remanent magnetization/polarization
+        # Candidates: Mr, Br, Jr, M_r, B_r, J_r, remanence, remanent_magnetization
+        jr_attr = None
+        for attr_name in ['Mr', 'Br', 'Jr', 'M_r', 'B_r', 'J_r', 'remanence', 'remanent_magnetization']:
+            if attr_name in available_attrs:
+                jr_attr = getattr(extrinsic, attr_name)
+                break
+        
+        if jr_attr is None:
+            print(f"  [WARNING] No remanent property found. Available attributes: {[a for a in available_attrs if not a.startswith('_')]}", file=sys.stderr)
+            return None
+        
+        # Robust numeric extraction in A/m, then convert to Tesla (polarization)
+        mu0 = 4 * np.pi * 1e-7
+        try:
+            jr_A_per_m = float(jr_attr.q.m)
+            return jr_A_per_m * mu0
+        except Exception:
+            pass
+        try:
+            jr_A_per_m = float(getattr(jr_attr.q, "magnitude"))
+            return jr_A_per_m * mu0
+        except Exception:
+            pass
+        try:
+            jr_A_per_m = float(getattr(jr_attr.q, "value"))
+            return jr_A_per_m * mu0
+        except Exception:
+            pass
+        try:
+            jr_A_per_m = float(jr_attr.q.to_value(u.A / u.m))
+            return jr_A_per_m * mu0
+        except Exception:
+            pass
+        try:
+            jr_A_per_m = float(getattr(jr_attr, "m"))
+            return jr_A_per_m * mu0
+        except Exception:
+            pass
+        try:
+            jr_A_per_m = float(getattr(jr_attr, "magnitude"))
+            return jr_A_per_m * mu0
+        except Exception:
+            pass
+        try:
+            jr_A_per_m = float(getattr(jr_attr, "value"))
+            return jr_A_per_m * mu0
+        except Exception:
+            pass
+        return None
+    except Exception as e:
+        print(f"[ERROR] ✗ Failed to compute Jr with mammos-analysis: {e}", file=sys.stderr)
+        return None
+
+
+def compute_bhmax_from_arrays(
+    Hext_T: np.ndarray,
+    J_T: np.ndarray,
+    demag: Optional[float] = None,
+) -> Optional[float]:
+    """Compute maximum energy product (BH)max (J/m³) from arrays µ0Hext (T) and J (T).
+
+    Definition: The maximum energy product (BH)max in units of J/m³ is represented by 
+    the maximum rectangular area that can be drawn under the B(H)-curve.
+    """
+    try:
+        if not _MAMMOS_ANALYSIS_AVAILABLE:
+            print(
+                "[ERROR] mammos-analysis not available. Install dependencies: "
+                "pip install mammos-analysis mammos-entity mammos-units",
+                file=sys.stderr,
+            )
+            return None
+
+        mu0 = 4 * np.pi * 1e-7
+        H_A_per_m = Hext_T / mu0
+        M_A_per_m = J_T / mu0
+
+        # Pass plain Python lists to mammos-entity as requested
+        H_entity = me.H(list(H_A_per_m))
+        M_entity = me.M(list(M_A_per_m))
+
+        extrinsic = mammos_analysis.hysteresis.extrinsic_properties(
+            H=H_entity,
+            M=M_entity,
+            demagnetization_coefficient=demag,
+        )
+        
+        # Check available attributes
+        available_attrs = dir(extrinsic)
+        
+        # Try common names for maximum energy product
+        # Candidates: BHmax, BH_max, energy_product_max, max_energy_product
+        bhmax_attr = None
+        for attr_name in ['BHmax', 'BH_max', 'energy_product_max', 'max_energy_product']:
+            if attr_name in available_attrs:
+                bhmax_attr = getattr(extrinsic, attr_name)
+                break
+        
+        if bhmax_attr is None:
+            print(f"  [WARNING] No BHmax property found. Available attributes: {[a for a in available_attrs if not a.startswith('_')]}", file=sys.stderr)
+            return None
+        
+        # Robust numeric extraction in J/m³
+        try:
+            return float(bhmax_attr.q.m)
+        except Exception:
+            pass
+        try:
+            return float(getattr(bhmax_attr.q, "magnitude"))
+        except Exception:
+            pass
+        try:
+            return float(getattr(bhmax_attr.q, "value"))
+        except Exception:
+            pass
+        try:
+            return float(bhmax_attr.q.to_value(u.J / u.m**3))
+        except Exception:
+            pass
+        try:
+            return float(getattr(bhmax_attr, "m"))
+        except Exception:
+            pass
+        try:
+            return float(getattr(bhmax_attr, "magnitude"))
+        except Exception:
+            pass
+        try:
+            return float(getattr(bhmax_attr, "value"))
+        except Exception:
+            pass
+        return None
+    except Exception as e:
+        print(f"[ERROR] ✗ Failed to compute BHmax with mammos-analysis: {e}", file=sys.stderr)
+        return None
+
+
+# =============================================================================
 # STEP 4: REPEAT AND AVERAGE
 # =============================================================================
 
@@ -664,6 +985,7 @@ def step4_repeat_and_average(
     average_only: bool = False,
     backup_existing: bool = False,
     clean_results: bool = False,
+    demag: Optional[float] = 1.0 / 3.0,
 ) -> None:
     """Repeat Steps 1-3 multiple times and compute averaged hysteresis loop.
     
@@ -1050,6 +1372,38 @@ def step4_repeat_and_average(
             mesh_grains = grains_override if grains_override is not None else 8
             mesh_extent = extent_override if extent_override else ("20,20,20" if neper_minimal else "80,80,80")
         
+        # Compute Hc for plotting (prefer averaged downward segment)
+        hc_for_plot: Optional[float] = None
+        try:
+            if data_average_down is not None:
+                Hext_down_T = data_average_down[:, 1]
+                J_down_T = data_average_down[:, 2]
+                hc_for_plot = compute_hc_from_arrays(Hext_down_T, J_down_T, demag=demag)
+            else:
+                Hext_avg_T = data_average[:, 1]
+                J_avg_T = data_average[:, 2]
+                idx_min = int(np.argmin(Hext_avg_T))
+                hc_for_plot = compute_hc_from_arrays(Hext_avg_T[: idx_min + 1], J_avg_T[: idx_min + 1], demag=demag)
+        except Exception as e:
+            print(f"[INFO] Could not compute Hc for plotting: {e}", file=sys.stderr)
+            hc_for_plot = None
+        
+        # Compute Jr for plotting (prefer averaged downward segment)
+        jr_for_plot: Optional[float] = None
+        try:
+            if data_average_down is not None:
+                Hext_down_T = data_average_down[:, 1]
+                J_down_T = data_average_down[:, 2]
+                jr_for_plot = compute_jr_from_arrays(Hext_down_T, J_down_T, demag=demag)
+            else:
+                Hext_avg_T = data_average[:, 1]
+                J_avg_T = data_average[:, 2]
+                idx_min = int(np.argmin(Hext_avg_T))
+                jr_for_plot = compute_jr_from_arrays(Hext_avg_T[: idx_min + 1], J_avg_T[: idx_min + 1], demag=demag)
+        except Exception as e:
+            print(f"[INFO] Could not compute Jr for plotting: {e}", file=sys.stderr)
+            jr_for_plot = None
+
         plot_hysteresis_loop(
             avg_file,
             plot_file,
@@ -1060,7 +1414,161 @@ def step4_repeat_and_average(
             extent=mesh_extent,
             num_down=len(dat_files_down),
             num_up=len(dat_files_up),
+            hc_A_per_m=hc_for_plot,
+            jr_T=jr_for_plot,
         )
+
+        # ===== Coercivity (Hc) via mammos-analysis (in-memory) =====
+        print(f"\n[B.8] COERCIVITY Hc COMPUTATION (mammos-analysis)")
+
+        hc_val = None
+
+        # Prefer the explicitly averaged downward part if available
+        if data_average_down is not None:
+            try:
+                Hext_down_T = data_average_down[:, 1]
+                J_down_T = data_average_down[:, 2]
+                print(f"  Using averaged downward segment: rows={Hext_down_T.shape[0]}")
+                hc_val = compute_hc_from_arrays(Hext_down_T, J_down_T, demag=demag)
+            except Exception as e:
+                print(f"  [INFO] Could not use averaged downward segment: {e}", file=sys.stderr)
+                hc_val = None
+        else:
+            # If only a combined average exists, slice start→min(H) without reordering
+            try:
+                Hext_avg_T = data_average[:, 1]
+                J_avg_T = data_average[:, 2]
+                idx_min = int(np.argmin(Hext_avg_T))
+                H_seg = Hext_avg_T[: idx_min + 1]
+                J_seg = J_avg_T[: idx_min + 1]
+                print(f"  Using downward slice from combined average: rows={H_seg.shape[0]}")
+                hc_val = compute_hc_from_arrays(H_seg, J_seg, demag=demag)
+            except Exception as e:
+                print(f"  [INFO] Could not extract downward slice from combined average: {e}", file=sys.stderr)
+                hc_val = None
+
+        # Final fallback (rare): compute from written average file
+        if hc_val is None:
+            hc_val = compute_hc_from_dat(avg_file, demag=demag)
+
+        if hc_val is not None:
+            hc_kA_per_m = hc_val / 1e3
+            print(f"  ✓ Hc = {hc_kA_per_m:.4g} kA/m")
+        else:
+            print("  [INFO] Skipped Hc computation (mammos-analysis unavailable or failed)")
+        
+        # ===== Remanent polarization (Jr) via mammos-analysis (in-memory) =====
+        print(f"\n[B.9] REMANENT POLARIZATION Jr COMPUTATION (mammos-analysis)")
+
+        jr_val = None
+
+        # Prefer the explicitly averaged downward part if available
+        if data_average_down is not None:
+            try:
+                Hext_down_T = data_average_down[:, 1]
+                J_down_T = data_average_down[:, 2]
+                print(f"  Using averaged downward segment: rows={Hext_down_T.shape[0]}")
+                jr_val = compute_jr_from_arrays(Hext_down_T, J_down_T, demag=demag)
+            except Exception as e:
+                print(f"  [INFO] Could not use averaged downward segment: {e}", file=sys.stderr)
+                jr_val = None
+        else:
+            # If only a combined average exists, slice start→min(H) without reordering
+            try:
+                Hext_avg_T = data_average[:, 1]
+                J_avg_T = data_average[:, 2]
+                idx_min = int(np.argmin(Hext_avg_T))
+                H_seg = Hext_avg_T[: idx_min + 1]
+                J_seg = J_avg_T[: idx_min + 1]
+                print(f"  Using downward slice from combined average: rows={H_seg.shape[0]}")
+                jr_val = compute_jr_from_arrays(H_seg, J_seg, demag=demag)
+            except Exception as e:
+                print(f"  [INFO] Could not extract downward slice from combined average: {e}", file=sys.stderr)
+                jr_val = None
+
+        if jr_val is not None:
+            print(f"  ✓ Jr = {jr_val:.4g} T")
+        else:
+            print("  [INFO] Skipped Jr computation (mammos-analysis unavailable or failed)")
+        
+        # ===== Maximum energy product (BH)max via mammos-analysis (in-memory) =====
+        print(f"\n[B.10] MAXIMUM ENERGY PRODUCT (BH)max COMPUTATION (mammos-analysis)")
+
+        bhmax_val = None
+
+        # Prefer the explicitly averaged downward part if available
+        if data_average_down is not None:
+            try:
+                Hext_down_T = data_average_down[:, 1]
+                J_down_T = data_average_down[:, 2]
+                print(f"  Using averaged downward segment: rows={Hext_down_T.shape[0]}")
+                bhmax_val = compute_bhmax_from_arrays(Hext_down_T, J_down_T, demag=demag)
+            except Exception as e:
+                print(f"  [INFO] Could not use averaged downward segment: {e}", file=sys.stderr)
+                bhmax_val = None
+        else:
+            # If only a combined average exists, slice start→min(H) without reordering
+            try:
+                Hext_avg_T = data_average[:, 1]
+                J_avg_T = data_average[:, 2]
+                idx_min = int(np.argmin(Hext_avg_T))
+                H_seg = Hext_avg_T[: idx_min + 1]
+                J_seg = J_avg_T[: idx_min + 1]
+                print(f"  Using downward slice from combined average: rows={H_seg.shape[0]}")
+                bhmax_val = compute_bhmax_from_arrays(H_seg, J_seg, demag=demag)
+            except Exception as e:
+                print(f"  [INFO] Could not extract downward slice from combined average: {e}", file=sys.stderr)
+                bhmax_val = None
+
+        if bhmax_val is not None:
+            bhmax_kJ_per_m3 = bhmax_val / 1e3  # Convert J/m³ to kJ/m³
+            print(f"  ✓ (BH)max = {bhmax_kJ_per_m3:.4g} kJ/m³")
+        else:
+            print("  [INFO] Skipped (BH)max computation (mammos-analysis unavailable or failed)")
+        
+        # ===== Write all extrinsic properties to CSV using mammos-entity =====
+        if hc_val is not None or jr_val is not None or bhmax_val is not None:
+            print(f"\n[B.11] WRITING EXTRINSIC PROPERTIES TO CSV")
+            properties_file = results_dir / "isotrop_average_properties.csv"
+            try:
+                # Prepare mammos-entity objects for CSV export
+                description = (
+                    "Averaged extrinsic properties for Benchmark 1.\n"
+                    "This file contains Hc (coercivity), Jr (remanent polarization), and BHmax (maximum energy product)\n"
+                    "computed from the averaged hysteresis loop.\n"
+                )
+                # Only include non-None values
+                entity_kwargs = {}
+                # Format and convert values for CSV export
+                if hc_val is not None:
+                    hc_kA_per_m = float(f"{hc_val / 1e3:.4g}")
+                    entity_kwargs["Hc"] = me.Hc(hc_kA_per_m, unit="kA/m")
+                if jr_val is not None:
+                    mu0 = 4 * np.pi * 1e-7
+                    mr_a_per_m = jr_val / mu0
+                    mr_kA_per_m = float(f"{mr_a_per_m / 1e3:.4g}")
+                    entity_kwargs["Mr"] = me.Mr(mr_kA_per_m, unit="kA/m")
+                if bhmax_val is not None:
+                    bhmax_kJ_per_m3 = float(f"{bhmax_val / 1e3:.4g}")
+                    entity_kwargs["BHmax"] = me.BHmax(bhmax_kJ_per_m3, unit="kJ/m^3")
+                me.io.entities_to_file(
+                    str(properties_file),
+                    description,
+                    **entity_kwargs
+                )
+                print(f"  ✓ Properties written to CSV: {properties_file.name}")
+                if hc_val is not None:
+                    print(f"    - Hc = {hc_val / 1e3:.4g} kA/m ({hc_val:.6f} A/m)")
+                if jr_val is not None:
+                    mu0 = 4 * np.pi * 1e-7
+                    jr_A_per_m = jr_val / mu0
+                    print(f"    - Jr = {jr_val:.4g} T ({jr_A_per_m:.6f} A/m)")
+                if bhmax_val is not None:
+                    print(f"    - (BH)max = {bhmax_val / 1e3:.4g} kJ/m³ ({bhmax_val:.6f} J/m³)")
+            except Exception as e:
+                print(f"  [WARNING] Could not write properties CSV: {e}", file=sys.stderr)
+                import traceback
+                traceback.print_exc()
         
         # Summary
         print("\n" + "=" * 80)
@@ -1078,6 +1586,17 @@ def step4_repeat_and_average(
         if dat_files_up:
             print(f"  Upward runs:   {results_dir}/isotrop_up_run01.dat ... isotrop_up_run{len(dat_files_up):02d}.dat")
         print(f"  Average result: {avg_file}")
+        if hc_val is not None or jr_val is not None or bhmax_val is not None:
+            properties_file = results_dir / "isotrop_average_properties.csv"
+            print(f"  Extrinsic properties: {properties_file}")
+            if hc_val is not None:
+                hc_kA_per_m = hc_val / 1e3
+                print(f"    - Hc = {hc_kA_per_m:.4g} kA/m")
+            if jr_val is not None:
+                print(f"    - Jr = {jr_val:.4g} T")
+            if bhmax_val is not None:
+                bhmax_kJ_per_m3 = bhmax_val / 1e3
+                print(f"    - (BH)max = {bhmax_kJ_per_m3:.4g} kJ/m³")
         
         print(f"\n[RESULT] ✓ Repeat and average workflow complete")
         print(f"[OUTPUT] Results directory: {results_dir}/")
@@ -1128,6 +1647,7 @@ def main() -> int:
         isotrop_runNN.dat       (Nth run)
         isotrop_average.dat     (averaged hysteresis loop)
         isotrop_average.png     (plot of averaged data)
+        isotrop_average_properties.csv  (extrinsic properties: Hc, Jr, BHmax)
     
     Examples:
     ---------
@@ -1211,18 +1731,11 @@ Examples:
         help="Remove (or backup with --backup) existing results in results/ before averaging (useful with --average-only)",
     )
     parser.add_argument(
-        "--overlay-oommf-easy",
-        type=Path,
-        default=None,
-        metavar="PATH",
-        help="Path to processed OOMMF easy-axis CSV (e.g., oommf_sweeps_easy_H_M_MoverMs.csv) to overlay on the plot",
-    )
-    parser.add_argument(
-        "--overlay-oommf-ms",
+        "--demag",
         type=float,
-        default=None,
-        metavar="Ms",
-        help="Ms (A/m) to convert OOMMF normalized magnetization to kA/m (default: 800000)",
+        default=1.0 / 3.0,
+        metavar="N",
+        help="Demagnetization coefficient for Hc/BHmax estimation (e.g., 1/3 for cube). Optional; Hc computed without it.",
     )
     
     args = parser.parse_args()
@@ -1235,11 +1748,7 @@ Examples:
     average_only = args.average_only
     backup_existing = args.backup
     clean_results = args.clean_results
-    # Set module-level overlay options
-    if args.overlay_oommf_easy is not None:
-        global OVERLAY_OOMMF_EASY_FILE, OVERLAY_OOMMF_MS
-        OVERLAY_OOMMF_EASY_FILE = args.overlay_oommf_easy
-        OVERLAY_OOMMF_MS = args.overlay_oommf_ms
+    demag_coeff = args.demag
     
     # Resolve paths relative to this script's directory
     run_dir = Path(__file__).resolve().parent
@@ -1262,6 +1771,7 @@ Examples:
     print(f"  Num repeats:  {args.repeats}")
     print(f"  Average only: {average_only}")
     print(f"  Backup files: {backup_existing}")
+    print(f"  Demag coeff:  {demag_coeff}")
     print(f"\n[PATH INFO]")
     print(f"  Base directory:        {base}")
     print(f"  Examples directory:    {run_dir.parent}")
@@ -1280,6 +1790,7 @@ Examples:
         average_only,
         backup_existing,
         clean_results,
+        demag_coeff,
     )
     
     print("\n" + "=" * 80)
