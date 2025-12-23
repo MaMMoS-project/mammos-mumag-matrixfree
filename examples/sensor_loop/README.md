@@ -212,3 +212,25 @@ These scripts are tailored for the above hardware and can be adapted for similar
 - [`run_sensor_case-c_h0p007_hstep0p00045.slurm`](../../run_sensor_case-c_h0p007_hstep0p00045.slurm)
 
 > These scripts demonstrate how to set up the environment, allocate resources, and run the sensor benchmark workflow efficiently on a suitable server. Adjust resource requests and paths as needed for your own system.
+
+## Running and Reusing Initial State Files
+
+It is possible to run only the initial equilibrium state computation and save the resulting mesh and state files for later use. This is useful for:
+- Preparing initial states in advance (e.g., on a powerful server)
+- Reusing the same initial state for multiple simulation runs or parameter sweeps
+- Sharing initial conditions between collaborators
+
+To do this:
+1. **Compute and save the initial state:**
+   ```sh
+   python examples/sensor_loop/sensor_loop_step_by_step.py --only-compute-initial-state
+   ```
+   This will generate and save the mesh (sensor.npz) and the initial state file (e.g., sensor.0050.state.npz) in the `examples/sensor_loop/sensor_initial_state` directory.
+
+2. **Load a specific initial state and mesh for a new simulation:**
+   ```sh
+   python examples/sensor_loop/sensor_loop_step_by_step.py --initial-state-file sensor.0050.state.npz --initial-mesh-file sensor.npz
+   ```
+   > **Important:** The mesh and state file must match exactly (i.e., the state file must have been generated using the same mesh). Using mismatched files will result in incorrect or failed simulations.
+
+You can also use backup or custom-named mesh/state files, but always ensure they are compatible.
