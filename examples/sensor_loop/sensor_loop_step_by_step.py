@@ -1,7 +1,22 @@
 #!/usr/bin/env python3
 
-# To run this script, navigate to the "/examples/sensor_loop" subfolder and
-# execute: python sensor_loop_step_by_step.py
+
+# MaMMoS Benchmark 2 (Sensor) - Step-by-Step Workflow
+# ---------------------------------------------------
+# This script automates the full simulation workflow for the MaMMoS sensor benchmark (Deliverable 6.2, Chapter 3).
+#
+# Steps:
+#   0. Mesh selection/generation and cleanup
+#   1. Compute initial equilibrium magnetization state
+#   2. Distribute initial state to all down-case directories
+#   3-11. For each case (a: easy-axis, b: 45-degree, c: hard-axis):
+#         - Run down-sweep (decreasing field)
+#         - Transfer state to up-case
+#         - Run up-sweep (increasing field)
+#
+# Usage: Run from the /examples/sensor_loop directory:
+#   python sensor_loop_step_by_step.py [options]
+# See README.md for detailed options and examples.
 
 
 from pathlib import Path
@@ -17,7 +32,8 @@ sys.stdout.reconfigure(line_buffering=True)
 
 
 def run_loop(loop_cmd: list[str], cwd: Path) -> None:
-    """Run the loop.py script in the specified working directory.
+    """
+    Run the loop.py script in the specified working directory.
 
     Args:
         loop_cmd: Base command list containing python, script path, and --mesh flag
@@ -38,13 +54,14 @@ def run_loop(loop_cmd: list[str], cwd: Path) -> None:
 
 
 def standardize_state_file_names(directory: Path, backup_name: str, simulation_name: str = "sensor") -> None:
-    """Rename backup state files to match the simulation name.
-    
+    """
+    Standardize state file names to match the simulation name prefix.
+
     For example, if simulation is called 'sensor', rename files like:
-    - sensor_backup.0050.state.npz → sensor.0050.state.npz
-    - other_prefix.0050.state.npz → sensor.0050.state.npz
-    
-    This ensures that state files loaded from external sources have consistent naming.
+      sensor_backup.0050.state.npz → sensor.0050.state.npz
+      other_prefix.0050.state.npz → sensor.0050.state.npz
+
+    This ensures that state files loaded from external sources or backups have consistent naming for workflow compatibility.
 
     Args:
         directory: Directory containing state files
@@ -87,12 +104,13 @@ def standardize_state_file_names(directory: Path, backup_name: str, simulation_n
 
 
 def standardize_mesh_file_name(directory: Path, backup_mesh_name: str = None, simulation_name: str = "sensor") -> None:
-    """Rename backup mesh file to match the simulation name.
-    
+    """
+    Standardize mesh file name to match the simulation name.
+
     For example, if simulation is called 'sensor', rename:
-    - sensor_backup.npz → sensor.npz
-    - other_mesh.npz → sensor.npz
-    
+      sensor_backup.npz → sensor.npz
+      other_mesh.npz → sensor.npz
+
     Args:
         directory: Directory containing mesh files
         backup_mesh_name: The specific backup mesh file name (if provided)
@@ -117,7 +135,8 @@ def standardize_mesh_file_name(directory: Path, backup_mesh_name: str = None, si
 
 
 def find_last_state_file(directory: Path) -> str:
-    """Find the last state file with format sensor.XXXX.state.npz and highest number XXXX.
+    """
+    Find the last state file with format sensor.XXXX.state.npz and highest number XXXX.
 
     Args:
         directory: Directory to search for state files
@@ -140,7 +159,8 @@ def find_last_state_file(directory: Path) -> str:
 def copy_state(
     src_dir: Path, src_name: str, dst_dir: Path, dst_name: str | None = None
 ) -> None:
-    """Copy a state file between directories.
+    """
+    Copy a state file between directories, optionally renaming it.
 
     Args:
         src_dir: Source directory containing the state file
@@ -160,9 +180,10 @@ def copy_state(
 
 
 def set_p2_params(directory: Path, updates: dict[str, str]) -> None:
-    """Force-set parameters in a sensor.p2 file within a directory.
+    """
+    Force-set parameters in a sensor.p2 file within a directory.
 
-    Ensures keys like 'ini' and 'hstep' are updated reliably regardless of spacing.
+    Ensures keys like 'ini' and 'hstep' are updated reliably regardless of spacing or order.
 
     Args:
         directory: Directory containing the sensor.p2 file
@@ -200,8 +221,9 @@ def set_p2_params(directory: Path, updates: dict[str, str]) -> None:
 
 
 def update_hstep_in_folders(directories: list[Path], new_hstep_abs: float) -> None:
-    """Update the hstep value in sensor.p2 files across multiple directories.
-    
+    """
+    Update the hstep value in sensor.p2 files across multiple directories.
+
     This function modifies the hstep parameter in sensor.p2 files while preserving
     the original sign (positive or negative). For example, if hstep = -0.00025 and
     new_hstep_abs = 0.003, the result will be hstep = -0.003.
@@ -261,13 +283,16 @@ def update_hstep_in_folders(directories: list[Path], new_hstep_abs: float) -> No
 
 def main() -> int:
     """
-    Orchestrate the step-by-step sensor loop workflow.
+    Orchestrate the step-by-step sensor loop workflow for MaMMoS Benchmark 2 (Sensor).
 
-    Workflow steps:
-    0. Select/generate mesh and clean up previous outputs
-    1. Compute initial equilibrium magnetization state
-    2. Distribute initial state to all down-case directories
-    3-11. For each case (a/b/c): run down-sweep → transfer state → run up-sweep
+    Steps:
+      0. Mesh selection/generation and cleanup
+      1. Compute initial equilibrium magnetization state
+      2. Distribute initial state to all down-case directories
+      3-11. For each case (a: easy-axis, b: 45-degree, c: hard-axis):
+            - Run down-sweep (decreasing field)
+            - Transfer state to up-case
+            - Run up-sweep (increasing field)
 
     Returns:
         Exit code (0 for success)
@@ -428,13 +453,8 @@ Examples:
     mesh_size_fine = args.mesh_size_fine  # Fine mesh element size
     # Examples of mesh sizes and resulting element counts for the eye sensor example:
     # h = 0.03 creates      nodes=24727,    tets=77791
-    # h = 0.02 creates      nodes=42803,    tets=133298  TODO: verify this again
-    # h = 0.015 creates     nodes=38465,    tets=118574  TODO: verify this again
-    # h = 0.01 creates      nodes=177289,   tets=581004  TODO: verify this again
-    # h = 0.01 creates      nodes=89761,    tets=292147 (meshpy backend)
-    # h = 0.007
+    # h = 0.01 creates      nodes=89761,    tets=292147
     # h = 0.005 creates     nodes=1044050,  tets=4454406
-    # h = 0.002
 
     # ============================================================================
     # END OF CONFIGURATION
@@ -487,8 +507,6 @@ Examples:
             print("[INFO] Continuing with simulation workflow...\n")
 
     # Step0.1: select coarse, fine, or custom mesh h, newly generate mesh if needed
-    #   + coarse mesh: python src/mesh.py --geom eye --extent 3.5,1.0,0.01 --h 0.03 --backend meshpy --out-name eye_meshpy --verbose
-    #   + fine mesh: python src/mesh.py --geom eye --extent 3.5,1.0,0.01 --h 0.005 --backend meshpy --out-name eye_meshpy --verbose
     # This step only creates the mesh for the eye shaped sensor, not for the surrounding air region
     print("\n" + "-" * 80)
     print("SENSOR-EXAMPLE, STEP 0.1: Mesh Selection and Generation")
