@@ -322,19 +322,6 @@ linear_metrics = extract_linear_range(
 
 ---
 
-## 11. Quality Assurance Checklist
-
-✅ **Formula validated against**: MaMMoS D6.2, Chapter 3 (page 8+)  
-✅ **Implementation verified in**: `sensor_loop_evaluation.py` (matches specification)  
-✅ **Material parameters confirmed**: Permalloy, Ms = 800 kA/m  
-✅ **Pinned layer direction (spec)**: +y (hard axis) per page 8  
-✅ **Component specified**: $M_y$ only, NOT projection on applied field  
-✅ **Normalization**: Both $\mu_0$ and $M_s$ applied  
-✅ **Units**: Tesla input, dimensionless output  
-✅ **Linear window**: Fixed at ±2.5 kA/m  
-
----
-
 ## Appendix A: Derivation Context
 
 The G(H) formula comes from **TMR (Tunneling Magnetoresistance) sensor physics**:
