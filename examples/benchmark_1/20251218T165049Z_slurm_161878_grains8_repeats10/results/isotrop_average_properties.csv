@@ -1,7 +1,7 @@
 #mammos csv v2
 #----------------------------------------
 # Averaged extrinsic properties for Benchmark 1.
-# This file contains Hc (coercivity), Jr (remanent polarization), and BHmax (maximum energy product)
+# This file contains Hc (coercivity), Mr (remanent magnetization), and BHmax (maximum energy product)
 # computed from the averaged hysteresis loop.
 # 
 #----------------------------------------
