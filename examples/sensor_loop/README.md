@@ -29,36 +29,42 @@ Automates the simulation workflow for all sensor cases (a: easy-axis, b: 45-degr
 
 #### Example Invocations
 
+> **IMPORTANT:** All commands below must be run from the main `mammos-mumag-matrixfree` folder (not from within examples/sensor_loop). Example:
+> 
+>     $ python examples/sensor_loop/sensor_loop_step_by_step.py
+> 
+> Running from any other directory may result in missing file errors.
+
 Below are example commands for running the workflow. Each command demonstrates a typical use case, such as running all cases, selecting specific cases, using different mesh sizes, updating parameters, or working with precomputed initial states. Comments are provided to clarify the purpose of each command.
 
 ```sh
 # Run full example with all cases (a, b, c)
-python sensor_loop_step_by_step.py  # Runs the complete workflow for all sensor cases
+python examples/sensor_loop/sensor_loop_step_by_step.py  # Runs the complete workflow for all sensor cases
 
 # Run minimal example with all cases
-python sensor_loop_step_by_step.py --minimal  # Uses a coarse mesh for faster execution
+python examples/sensor_loop/sensor_loop_step_by_step.py --minimal  # Uses a coarse mesh for faster execution
 
 # Run minimal example with only case a
-python sensor_loop_step_by_step.py --minimal --cases a  # Only simulates the easy-axis case
+python examples/sensor_loop/sensor_loop_step_by_step.py --minimal --cases a  # Only simulates the easy-axis case
 
 # Run full example with cases a and b
-python sensor_loop_step_by_step.py --cases a b  # Simulates only the easy-axis and 45-degree cases
+python examples/sensor_loop/sensor_loop_step_by_step.py --cases a b  # Simulates only the easy-axis and 45-degree cases
 
 # Run with custom mesh sizes
-python sensor_loop_step_by_step.py --minimal --mesh-size-coarse 0.02  # Custom coarse mesh size
-python sensor_loop_step_by_step.py --mesh-size-fine 0.01  # Custom fine mesh size
+python examples/sensor_loop/sensor_loop_step_by_step.py --minimal --mesh-size-coarse 0.02  # Custom coarse mesh size
+python examples/sensor_loop/sensor_loop_step_by_step.py --mesh-size-fine 0.01  # Custom fine mesh size
 
 # Directly specify mesh element size h (overrides coarse/fine) and update hstep in all sensor_case-*_* folders
-python sensor_loop_step_by_step.py --mesh-h 0.0125 --hstep 0.003  # Custom mesh and hstep for all cases
+python examples/sensor_loop/sensor_loop_step_by_step.py --mesh-h 0.0125 --hstep 0.003  # Custom mesh and hstep for all cases
 
 # Load a specific initial state file by name
-python sensor_loop_step_by_step.py --initial-state-file sensor.0050.state.npz  # Use a precomputed initial state
+python examples/sensor_loop/sensor_loop_step_by_step.py --initial-state-file sensor.0050.state.npz  # Use a precomputed initial state
 
 # Only compute or load the initial state and exit
-python sensor_loop_step_by_step.py --only-compute-initial-state  # Stops after initial state preparation
+python examples/sensor_loop/sensor_loop_step_by_step.py --only-compute-initial-state  # Stops after initial state preparation
 
 # Load initial state with backup mesh file
-python sensor_loop_step_by_step.py --initial-state-file backup_sensor.0050.state.npz --initial-mesh-file sensor_backup.npz  # Use backup files for initial state and mesh
+python examples/sensor_loop/sensor_loop_step_by_step.py --initial-state-file backup_sensor.0050.state.npz --initial-mesh-file sensor_backup.npz  # Use backup files for initial state and mesh
 ```
 
 ### 2. sensor_loop_evaluation.py

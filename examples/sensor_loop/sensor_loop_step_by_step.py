@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+# NOTE: This script must be run from the main 'mammos-mumag-matrixfree' folder!
+# Example:
+#   $ python examples/sensor_loop/sensor_loop_step_by_step.py
+# Running from any other directory may result in missing file errors.
 
 # MaMMoS Benchmark 2 (Sensor) - Step-by-Step Workflow
 # ---------------------------------------------------
