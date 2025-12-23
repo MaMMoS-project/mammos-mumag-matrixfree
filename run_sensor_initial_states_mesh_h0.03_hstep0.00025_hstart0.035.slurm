@@ -43,8 +43,8 @@ echo "SIMDIR:" $SIMDIR
 MESH_H="0.03"
 # HSTEP can be chosen freely
 HSTEP="0.00025"
-KL_air="5.0"
-K_air="1.3"
+KL_air="10.0"
+K_air="2.0"
 
 # ============================================================================
 
