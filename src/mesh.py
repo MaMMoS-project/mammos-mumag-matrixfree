@@ -1342,15 +1342,6 @@ def run_single_solid_mesher(
 
 
 
-def find_gmsh_path() -> str | None:
-    """
-    Attempt to locate the gmsh executable on PATH.
-    Returns the directory path to gmsh if found, None otherwise.
-    """
-    gmsh_full = shutil.which("gmsh")
-    if gmsh_full:
-        return os.path.dirname(gmsh_full)
-    return None
 
 def mesh_backend_neper_poly(n: int, seed: int, size_x: float, size_y: float, size_z: float, h: float):
     import subprocess, sys
@@ -1366,19 +1357,8 @@ def mesh_backend_neper_poly(n: int, seed: int, size_x: float, size_y: float, siz
     cmd_vis = ["neper", "-V", f"n{n}-id{seed}.tess", "-datacellcol", "id", "-print", f"n{n}-id{seed}"]
     subprocess.run(cmd_vis, check=True)
 
-    # 2) Mesh tessellation (pass full gmsh path to Neper)
+    # 2) Mesh tessellation
     cmd_mesh = ["neper", "-M", f"n{n}-id{seed}.tess", "-cl", f"{h}", "-format", "vtk"]
-    gmsh_path = find_gmsh_path()
-    if gmsh_path:
-        # Pass the full path to gmsh; Neper requires a valid filesystem path
-        print("extend no more needed")
-        # cmd_mesh.extend(["-gmsh", gmsh_path])
-    else:
-        print(
-            "[warn] gmsh executable not found on PATH; Neper meshing may fail. "
-            "Install gmsh or ensure it is available on your PATH.",
-            file=sys.stderr,
-        )
     subprocess.run(cmd_mesh, check=True)
 
     # 3) Load VTK and propagate grain IDs
