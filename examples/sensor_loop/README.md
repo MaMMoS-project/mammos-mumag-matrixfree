@@ -34,6 +34,8 @@ Automates the simulation workflow for all sensor cases (a: easy-axis, b: 45-degr
 >     $ python examples/sensor_loop/sensor_loop_step_by_step.py
 > 
 > Running from any other directory may result in missing file errors.
+>
+> **WARNING:** The sensor benchmark workflow is computationally demanding. It is strongly recommended to run these scripts on a computer with appropriate hardware (sufficient RAM and, if using JAX with GPU/TPU acceleration, a compatible device and drivers). Running with the full/recommended mesh size and small simulation h_step values may require significant memory and compute resources. Insufficient hardware may result in out-of-memory errors or very slow execution. Adjust mesh size and h_step as needed for your system.
 
 Below are example commands for running the workflow. Each command demonstrates a typical use case, such as running all cases, selecting specific cases, using different mesh sizes, updating parameters, or working with precomputed initial states. Comments are provided to clarify the purpose of each command.
 
@@ -190,3 +192,23 @@ Simulation output files (e.g., `sensor.dat`) contain columns:
 For a detailed derivation, physical context, and example calculations, see the full [G_H_FORMULA_SUMMARY.md](G_H_FORMULA_SUMMARY.md) or consult Section 3 of the official [MaMMoS Deliverable 6.2 (PDF)](https://mammos-project.github.io/resources.html).
 
 ---
+
+## Running on HPC/Server Environments
+
+For large-scale or production runs, especially with the full mesh size and small h_step, it is recommended to use a high-performance computing (HPC) server or cluster with sufficient resources. The MaMMoS project provides highly-specialized SLURM batch scripts for this purpose.
+
+**Example server hardware used for official runs:**
+- CPU: AMD EPYC 7343 16-Core Processor (32 cores, x86_64, 64-bit)
+- GPU: Nvidia A100 (Ampere, 80 GB) and Nvidia L40s (Ada, 48 GB)
+
+> **Note:** Even with this high-end hardware, a full sensor benchmark simulation can require many hours to complete (often multiple of 10 hours, depending on mesh size, h_step, and case selection).
+
+These scripts are tailored for the above hardware and can be adapted for similar systems.
+
+**See the provided SLURM scripts in the main directory for reference:**
+- [`run_sensor_initial_states_mesh_h0.03_hstep0.001_hstart0.035.slurm`](../../run_sensor_initial_states_mesh_h0.03_hstep0.001_hstart0.035.slurm)
+- [`run_sensor_case-a_h0p03_hstep0p00045.slurm`](../../run_sensor_case-a_h0p03_hstep0p00045.slurm)
+- [`run_sensor_case-abc_h0p03_hstep0p00045.slurm`](../../run_sensor_case-abc_h0p03_hstep0p00045.slurm)
+- [`run_sensor_case-c_h0p007_hstep0p00045.slurm`](../../run_sensor_case-c_h0p007_hstep0p00045.slurm)
+
+> These scripts demonstrate how to set up the environment, allocate resources, and run the sensor benchmark workflow efficiently on a suitable server. Adjust resource requests and paths as needed for your own system.
