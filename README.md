@@ -718,3 +718,17 @@ To enforce \(|\mathbf m|=1\) we optimize in an unconstrained variable \(\mathbf 
 
 ---
 
+## MaMMoS Benchmarks: Example Workflows
+
+This repository includes two official MaMMoS benchmark workflows, each with its own example subfolder and detailed README:
+
+- **Benchmark 1: Grain-Resolved Magnetostatics**
+  - See: `examples/benchmark_1/`
+  - Description: Simulates the magnetostatic response of polycrystalline or granular samples, focusing on demagnetization and field distribution in complex geometries. The workflow and scientific background are described in the README in that folder.
+
+- **Benchmark 2: Magnetic Field Sensor (TMR)**
+  - See: `examples/sensor_loop/`
+  - Description: Simulates the full hysteresis loop and electrical response of a magnetic field sensor (TMR), including mesh generation, initial state computation, and field sweeps. The workflow, physical context, and analysis steps are described in detail in the README in that folder.
+
+> For full scientific definitions, parameters, and step-by-step instructions, see the README.md files in each benchmark subfolder. These are based on the official MaMMoS Deliverable 6.2 and provide all necessary details to reproduce the benchmarks.
+
