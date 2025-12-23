@@ -414,7 +414,9 @@ def plot_sensor_data_a(
             "o",
             color="C1",
             markersize=8,
-                label=f"Saturation: Hs = {Hs_in_kA_Per_m:.4g} kA/m",
+            fillstyle="none",
+            markeredgewidth=2,
+            label=f"Saturation: Hs = {Hs_in_kA_Per_m:.4g} kA/m",
             zorder=5,
         )
 
@@ -531,7 +533,9 @@ def plot_sensor_data_b(
             "o",
             color="C1",
             markersize=8,
-                label=f"Coercivity: Hc45 = {Hc45_in_kA_Per_m:.4g} kA/m",
+            fillstyle="none",
+            markeredgewidth=2,
+            label=f"Coercivity: Hc45 = {Hc45_in_kA_Per_m:.4g} kA/m",
             zorder=5,
         )
 

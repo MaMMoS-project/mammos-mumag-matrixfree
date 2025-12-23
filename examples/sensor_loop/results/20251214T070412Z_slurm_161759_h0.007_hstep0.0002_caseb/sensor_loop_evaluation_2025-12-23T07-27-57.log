@@ -1,0 +1,20 @@
+================================================================================
+SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case b)
+================================================================================
+[INPUT]  Data file: /home/hortschitz/Documents/Nextcloud_diss/Projekte/2024 MaMMOS/Software_mumag/mammos-mumag-matrixfree_benchmark_1/mammos-mumag-matrixfree/examples/sensor_loop/results/20251214T070412Z_slurm_161759_h0.007_hstep0.0002_caseb/sensor_case-b_h0.007_hstep0.0002.dat
+[OUTPUT] Directory: /home/hortschitz/Documents/Nextcloud_diss/Projekte/2024 MaMMOS/Software_mumag/mammos-mumag-matrixfree_benchmark_1/mammos-mumag-matrixfree/examples/sensor_loop/results/20251214T070412Z_slurm_161759_h0.007_hstep0.0002_caseb
+[PLOT]   X-axis range: -15 to 15 kA/m
+[PLOT]   Figure name: diagonal
+
+Coercivity at 45° (diagonal axis):
+  Hc,45° = 2914 A/m
+  [REFERENCE] Loading OOMMF reference from: oommf_sweeps_diagonal_H_M_MoverMs.csv
+  [REFERENCE] Successfully plotted OOMMF reference overlay
+  [PLOT] Saved: sensor_case-b-diagonal.png
+
+================================================================================
+PLOTTING COMPLETED
+================================================================================
+[OUTPUT] Plot saved to: /home/hortschitz/Documents/Nextcloud_diss/Projekte/2024 MaMMOS/Software_mumag/mammos-mumag-matrixfree_benchmark_1/mammos-mumag-matrixfree/examples/sensor_loop/results/20251214T070412Z_slurm_161759_h0.007_hstep0.0002_caseb
+[LOG]    Log saved to: /home/hortschitz/Documents/Nextcloud_diss/Projekte/2024 MaMMOS/Software_mumag/mammos-mumag-matrixfree_benchmark_1/mammos-mumag-matrixfree/examples/sensor_loop/results/20251214T070412Z_slurm_161759_h0.007_hstep0.0002_caseb/sensor_loop_evaluation_2025-12-23T07-27-57.log
+================================================================================

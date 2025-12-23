@@ -1,0 +1,37 @@
+================================================================================
+SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case c)
+================================================================================
+[INPUT]  Data file: /home/hortschitz/Documents/Nextcloud_diss/Projekte/2024 MaMMOS/Software_mumag/mammos-mumag-matrixfree_benchmark_1/mammos-mumag-matrixfree/examples/sensor_loop/results/20251220T061547Z_slurm_161904_h0.004_hstep0.00045_casec/sensor_case-c_h0.004_hstep0.00045.dat
+[OUTPUT] Directory: /home/hortschitz/Documents/Nextcloud_diss/Projekte/2024 MaMMOS/Software_mumag/mammos-mumag-matrixfree_benchmark_1/mammos-mumag-matrixfree/examples/sensor_loop/results/20251220T061547Z_slurm_161904_h0.004_hstep0.00045_casec
+[PLOT]   X-axis range: -15 to 15 kA/m
+[PLOT]   Figure name: hard-axis
+[PLOT]   Fit window: ±2.5 kA/m
+
+  [REFERENCE] Loading OOMMF reference from: oommf_sweeps_hard_H_M_MoverMs.csv
+  [REFERENCE] Successfully plotted OOMMF reference overlay
+
+Hard-axis sensitivity (sweep c):
+
+  Magnetic sensitivity:
+    Fit window: H ∈ [-2500, 2500] A/m
+    Slope (dM/dH): 75.78 (A/m)/(A/m)
+    Intercept: -30.93 A/m
+    Points used: 28
+
+  Electrical model (Slonczewski MTJ):
+    P² (spin polarization): 0.3333
+    Rmin: 429.2 Ω
+    G₀: 1.748 mS
+    Slope (dG/dH): 5.518e-08 S/(A/m)
+    Intercept: 0.001747 S
+
+  Non-linearity:
+    Max residual: 231.8 A/m
+  [PLOT] Saved: sensor_case-c-hard-axis.png
+
+================================================================================
+PLOTTING COMPLETED
+================================================================================
+[OUTPUT] Plot saved to: /home/hortschitz/Documents/Nextcloud_diss/Projekte/2024 MaMMOS/Software_mumag/mammos-mumag-matrixfree_benchmark_1/mammos-mumag-matrixfree/examples/sensor_loop/results/20251220T061547Z_slurm_161904_h0.004_hstep0.00045_casec
+[LOG]    Log saved to: /home/hortschitz/Documents/Nextcloud_diss/Projekte/2024 MaMMOS/Software_mumag/mammos-mumag-matrixfree_benchmark_1/mammos-mumag-matrixfree/examples/sensor_loop/results/20251220T061547Z_slurm_161904_h0.004_hstep0.00045_casec/sensor_loop_evaluation_2025-12-23T07-27-59.log
+================================================================================

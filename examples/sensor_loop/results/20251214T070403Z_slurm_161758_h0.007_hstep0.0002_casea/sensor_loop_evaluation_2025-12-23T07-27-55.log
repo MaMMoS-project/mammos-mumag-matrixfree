@@ -1,0 +1,18 @@
+================================================================================
+SENSOR LOOP EVALUATION - STANDALONE PLOT MODE (case a)
+================================================================================
+[INPUT]  Data file: /home/hortschitz/Documents/Nextcloud_diss/Projekte/2024 MaMMOS/Software_mumag/mammos-mumag-matrixfree_benchmark_1/mammos-mumag-matrixfree/examples/sensor_loop/results/20251214T070403Z_slurm_161758_h0.007_hstep0.0002_casea/sensor_case-a_h0.007_hstep0.0002.dat
+[OUTPUT] Directory: /home/hortschitz/Documents/Nextcloud_diss/Projekte/2024 MaMMOS/Software_mumag/mammos-mumag-matrixfree_benchmark_1/mammos-mumag-matrixfree/examples/sensor_loop/results/20251214T070403Z_slurm_161758_h0.007_hstep0.0002_casea
+[PLOT]   X-axis range: -15 to 15 kA/m
+[PLOT]   Figure name: easy-axis
+
+Saturation field (reset field, easy axis):
+  Hs = 7627 A/m
+  M/Ms at Hs = 0.996
+  [REFERENCE] Loading OOMMF reference from: oommf_sweeps_easy_H_M_MoverMs.csv
+  [REFERENCE] Successfully plotted OOMMF reference overlay
+  [PLOT] Saved: sensor_case-a-easy-axis.png
+
+================================================================================
+[LOG]    Log saved to: /home/hortschitz/Documents/Nextcloud_diss/Projekte/2024 MaMMOS/Software_mumag/mammos-mumag-matrixfree_benchmark_1/mammos-mumag-matrixfree/examples/sensor_loop/results/20251214T070403Z_slurm_161758_h0.007_hstep0.0002_casea/sensor_loop_evaluation_2025-12-23T07-27-55.log
+================================================================================
