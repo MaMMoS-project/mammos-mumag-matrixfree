@@ -42,6 +42,11 @@ import shutil
 import sys
 from pathlib import Path
 from typing import List, Optional
+import ast
+
+# Module-level overlay options (set in main via CLI)
+OVERLAY_OOMMF_EASY_FILE: Optional[Path] = None
+OVERLAY_OOMMF_MS: Optional[float] = None
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -373,6 +378,36 @@ def step3b_run_loop_up(base: Path, benchmark_dir: Path, num_loops: int = 1) -> N
 # PLOTTING UTILITIES
 # =============================================================================
 
+def _read_oommf_easy_processed_csv(csv_path: Path):
+    """Read OOMMF processed 'easy' CSV produced by plot_oommf_sweeps.py.
+
+    Returns dict with keys 'H_A_per_m', 'M_over_Ms'.
+    The file format stores full arrays in a single CSV row as stringified lists.
+    """
+    non_comment_lines = []
+    with open(csv_path, 'r') as f:
+        for line in f:
+            if line.strip().startswith('#'):
+                continue
+            non_comment_lines.append(line)
+    import csv as _csv
+    reader = _csv.reader(non_comment_lines)
+    data_row = None
+    for row in reader:
+        if not row:
+            continue
+        if len(row) >= 3 and row[0].strip().startswith('[') and row[2].strip().startswith('['):
+            data_row = row
+            break
+    if data_row is None:
+        raise ValueError(f"No data row found in {csv_path}")
+    H_list = ast.literal_eval(data_row[0])
+    M_over_Ms_list = ast.literal_eval(data_row[2])
+    return {
+        'H_A_per_m': H_list,
+        'M_over_Ms': M_over_Ms_list,
+    }
+
 def plot_hysteresis_loop(
     data_file: Path, 
     output_file: Path, 
@@ -381,6 +416,8 @@ def plot_hysteresis_loop(
     num_runs: Optional[int] = None,
     grains: Optional[int] = None,
     extent: Optional[str] = None,
+    num_down: Optional[int] = None,
+    num_up: Optional[int] = None,
 ) -> None:
     """Plot hysteresis loop from .dat file.
     
@@ -399,6 +436,8 @@ def plot_hysteresis_loop(
         num_runs: Optional number of runs used for averaging (shown in title)
         grains: Optional grain count used for the mesh (shown in title)
         extent: Optional extent string (Lx,Ly,Lz) used for the mesh (shown in title)
+        num_down: Optional number of downward runs (shown in legend)
+        num_up: Optional number of upward runs (shown in legend)
     """
     try:
         # Load data, skipping header line
@@ -412,47 +451,73 @@ def plot_hysteresis_loop(
         J_h_T = data[:, 2]  # Magnetization response [T]
         
         # Convert to physical units
-        Hext_kA_per_m = Hext_T / mu0 / 1e3  # External field [kA/m]
         M_kA_per_m = J_h_T / mu0 / 1e3  # Magnetization [kA/m]
         
         # Create plot with secondary axes (bottom: Tesla, top: kA/m)
         fig, ax_left = plt.subplots(figsize=(10, 6))
 
-        # Optional overlays for downward runs (gray)
+        # Optional overlay: OOMMF easy-axis processed CSV (matches 'easy-axis' plot)
+        try:
+            if OVERLAY_OOMMF_EASY_FILE is not None:
+                easy = _read_oommf_easy_processed_csv(OVERLAY_OOMMF_EASY_FILE)
+                ms_val = OVERLAY_OOMMF_MS if (OVERLAY_OOMMF_MS is not None and OVERLAY_OOMMF_MS > 0) else 800000.0
+                H_oommf_T = mu0 * np.array(easy['H_A_per_m'], dtype=float)
+                M_oommf_kApm = (np.array(easy['M_over_Ms'], dtype=float) * ms_val) / 1e3
+                ax_left.plot(
+                    H_oommf_T, M_oommf_kApm,
+                    color='red', linestyle='--', linewidth=1.5,
+                    label='OOMMF easy-axis'
+                )
+        except Exception as e:
+            print(f"[WARNING] Failed to overlay OOMMF easy-axis: {e}", file=sys.stderr)
+
+        # Track plot handles and labels for separate legends
+        individual_handles = []
+        individual_labels = []
+        averaged_handles = []
+        averaged_labels = []
+
+        # Optional overlays for downward runs (transparent blue)
         if overlay_down_files:
-            for ofile in overlay_down_files:
+            for idx, ofile in enumerate(overlay_down_files):
                 try:
                     odata = np.loadtxt(ofile, skiprows=1)
                     oHext_T = odata[:, 1]
                     oJ_h_T = odata[:, 2]
                     oM_kA_per_m = oJ_h_T / mu0 / 1e3
-                    ax_left.plot(
+                    line, = ax_left.plot(
                         oHext_T,
                         oM_kA_per_m,
-                        color="gray",
-                        alpha=0.5,
+                        color="C0",
+                        alpha=0.25,
+                        linestyle="--",
                         linewidth=1.0,
-                        label=None,
                     )
+                    if idx == 0:
+                        individual_handles.append(line)
+                        individual_labels.append("Individual down-ward runs")
                 except Exception as overlay_err:
                     print(f"[WARNING] Could not overlay {ofile}: {overlay_err}", file=sys.stderr)
         
-        # Optional overlays for upward runs (orange for contrast)
+        # Optional overlays for upward runs (transparent orange)
         if overlay_up_files:
-            for ofile in overlay_up_files:
+            for idx, ofile in enumerate(overlay_up_files):
                 try:
                     odata = np.loadtxt(ofile, skiprows=1)
                     oHext_T = odata[:, 1]
                     oJ_h_T = odata[:, 2]
                     oM_kA_per_m = oJ_h_T / mu0 / 1e3
-                    ax_left.plot(
+                    line, = ax_left.plot(
                         oHext_T,
                         oM_kA_per_m,
-                        color="orange",
-                        alpha=0.5,
+                        color="C3",
+                        alpha=0.25,
+                        linestyle="--",
                         linewidth=1.0,
-                        label=None,
                     )
+                    if idx == 0:
+                        individual_handles.append(line)
+                        individual_labels.append("Individual up-ward runs")
                 except Exception as overlay_err:
                     print(f"[WARNING] Could not overlay {ofile}: {overlay_err}", file=sys.stderr)
 
@@ -468,52 +533,92 @@ def plot_hysteresis_loop(
             has_down = has_up = False
 
         if has_down and has_up:
+            # Build legend labels with optional run counts
+            down_label = "Average down-ward path of hysteresis loop"
+            if num_down is not None and num_down > 0:
+                down_label += f" (n={num_down})"
+            up_label = "Average up-ward path of hysteresis loop"
+            if num_up is not None and num_up > 0:
+                up_label += f" (n={num_up})"
+            
             # Downward averaged segment: start -> min(H)
-            ax_left.plot(
+            line_down, = ax_left.plot(
                 Hext_T[: idx_min + 1],
                 M_kA_per_m[: idx_min + 1],
                 color="C0",
                 linewidth=1.5,
-                label="Average down-ward path of hysteresis loop",
             )
+            averaged_handles.append(line_down)
+            averaged_labels.append(down_label)
+            
             # Upward averaged segment: min(H) -> end
-            ax_left.plot(
+            line_up, = ax_left.plot(
                 Hext_T[idx_min :],
                 M_kA_per_m[idx_min :],
                 color="C3",
                 linewidth=1.5,
-                label="Average up-ward path of hysteresis loop",
             )
+            averaged_handles.append(line_up)
+            averaged_labels.append(up_label)
         else:
             # Fallback: single averaged curve
-            ax_left.plot(Hext_T, M_kA_per_m, "C0-", linewidth=1.5, label="Hysteresis loop")
-            ax_left.plot(Hext_T, M_kA_per_m, "C0+", markersize=4, alpha=0.6, label="Data points")
+            line1, = ax_left.plot(Hext_T, M_kA_per_m, "C0-", linewidth=1.5)
+            line2, = ax_left.plot(Hext_T, M_kA_per_m, "C0+", markersize=4, alpha=0.6)
+            averaged_handles.extend([line1, line2])
+            averaged_labels.extend(["Hysteresis loop", "Data points"])
         ax_left.set_xlabel("Applied Field µ0 Hext (T)", fontsize=11)
         ax_left.set_ylabel("Magnetization M (kA/m)", fontsize=11)
         ax_left.grid(True, alpha=0.3)
+        ax_left.set_xlim(-2, 2.0)
 
-        # Secondary y-axis: J in Tesla
-        ax_right = ax_left.twinx()
-        ax_right.set_ylabel("Magnetization J (T)", fontsize=11)
-        ax_right.set_ylim(ax_left.get_ylim())
-        # Map kA/m ticks back to Tesla using mu0
-        left_ticks = ax_left.get_yticks()
-        ax_right.set_yticks(left_ticks)
-        ax_right.set_yticklabels([f"{tick * mu0 * 1e3:.2f}" for tick in left_ticks])
-
-        # Secondary x-axis: Hext in kA/m (converted from bottom Tesla)
-        ax_top = ax_left.twiny()
-        ax_top.set_xlabel("Applied Field Hext (kA/m)", fontsize=11)
-        top_ticks = ax_left.get_xticks()
-        ax_top.set_xticks(top_ticks)
-        ax_top.set_xlim(ax_left.get_xlim())
-        # Round top-axis ticks to whole numbers (kA/m) with no decimal part
-        ax_top.set_xticklabels([f"{tick / mu0 / 1e3:.0f}" for tick in top_ticks])
-
+        # ===== SECONDARY AXES FOR UNIT CONVERSION =====
+        # We use secondary_yaxis() and secondary_xaxis() to create linked axes that:
+        # 1. Stay synchronized with the primary axes (automatic rescaling/panning)
+        # 2. Allow displaying the same physical data in different units
+        # 3. Use transformation functions for automatic tick label conversion
+        #
+        # Alternative approach (twinx/twiny) creates independent axes with separate scales,
+        # which would require manual synchronization and is not needed here since we're
+        # just converting units, not plotting different datasets.
+        
+        # Define conversion functions for magnetization: M (kA/m) ↔ J (T)
+        # Physical relationship: Magnetic polarization J = µ0 * M
+        # where µ0 = 4π×10⁻⁷ T·m/A is the permeability of free space
+        def M_to_J(M_kA_per_m):
+            """Convert magnetization from kA/m to Tesla (J = µ0 * M)"""
+            return M_kA_per_m * mu0 * 1e3
+        
+        def J_to_M(J_T):
+            """Convert magnetization from Tesla to kA/m (M = J / µ0)"""
+            return J_T / (mu0 * 1e3)
+        
+        # Define conversion functions for applied field: µ0*Hext (T) ↔ Hext (kA/m)
+        # Physical relationship: µ0*H is the magnetic flux density in Tesla
+        def H_T_to_kA_per_m(H_T):
+            """Convert applied field from Tesla to kA/m"""
+            return H_T / (mu0 * 1e3)
+        
+        def H_kA_per_m_to_T(H_kA_per_m):
+            """Convert applied field from kA/m to Tesla"""
+            return H_kA_per_m * mu0 * 1e3
+        
+        # RIGHT Y-AXIS: Magnetization in Tesla using transformation functions
+        ax_right = ax_left.secondary_yaxis('right', functions=(M_to_J, J_to_M))
+        ax_right.set_ylabel("Magnetization µ0 M (T)", fontsize=11)
+        yticks_left = ax_left.get_yticks()
+        yticks_right = M_to_J(yticks_left)
+        ax_right.set_yticks(yticks_right, labels=[f"{y:.3f}" for y in yticks_right])
+        
+        # TOP X-AXIS: Applied field in kA/m using transformation functions
+        x_top = ax_left.secondary_xaxis('top', functions=(H_T_to_kA_per_m, H_kA_per_m_to_T))
+        x_top.set_xlabel("Applied Field Hext (kA/m)", fontsize=11)
+        xticks_bottom = ax_left.get_xticks()
+        xticks_top = H_T_to_kA_per_m(xticks_bottom)
+        x_top.set_xticks(xticks_top, labels=[f"{x:.0f}" for x in xticks_top])        
+        
+        
         # Build title with optional run count, grains, and extent
         title_parts = []
-        if num_runs is not None and num_runs > 0:
-            title_parts.append(f"n={num_runs} runs")
         if grains is not None and grains > 0:
             title_parts.append(f"grains={grains}")
         if extent:
@@ -523,7 +628,15 @@ def plot_hysteresis_loop(
         title_suffix = f" ({', '.join(title_parts)})" if title_parts else ""
         title = f"Averaged Hysteresis Loop{title_suffix}"
         ax_left.set_title(title, fontsize=12, fontweight="bold")
-        ax_left.legend(loc="best", fontsize=10)
+        
+        # Create two separate legends: one for averaged curves (top left), one for individual runs (bottom right)
+        if averaged_handles:
+            legend1 = ax_left.legend(averaged_handles, averaged_labels, loc="upper left", fontsize=10, framealpha=0.9)
+            ax_left.add_artist(legend1)  # Add first legend back to plot
+        
+        if individual_handles:
+            ax_left.legend(individual_handles, individual_labels, loc="lower right", fontsize=10, framealpha=0.9)
+        
         fig.tight_layout()
         
         # Save plot
@@ -927,9 +1040,16 @@ def step4_repeat_and_average(
         # Generate plot for averaged data with both directions
         print(f"\n[B.7] GENERATING PLOT")
         plot_file = results_dir / "isotrop_average.png"
-        total_runs = len(dat_files_down) + len(dat_files_up)
-        mesh_grains = grains_override if grains_override is not None else 8
-        mesh_extent = extent_override if extent_override else ("20,20,20" if neper_minimal else "80,80,80")
+        total_runs = len(dat_files_down) + len(dat_files_up) / 2
+        
+        # In average-only mode, only include grains/extent in title if explicitly specified by user
+        if average_only:
+            mesh_grains = grains_override  # None if not specified
+            mesh_extent = extent_override  # None if not specified
+        else:
+            mesh_grains = grains_override if grains_override is not None else 8
+            mesh_extent = extent_override if extent_override else ("20,20,20" if neper_minimal else "80,80,80")
+        
         plot_hysteresis_loop(
             avg_file,
             plot_file,
@@ -938,6 +1058,8 @@ def step4_repeat_and_average(
             num_runs=total_runs,
             grains=mesh_grains,
             extent=mesh_extent,
+            num_down=len(dat_files_down),
+            num_up=len(dat_files_up),
         )
         
         # Summary
@@ -1088,6 +1210,20 @@ Examples:
         action="store_true",
         help="Remove (or backup with --backup) existing results in results/ before averaging (useful with --average-only)",
     )
+    parser.add_argument(
+        "--overlay-oommf-easy",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Path to processed OOMMF easy-axis CSV (e.g., oommf_sweeps_easy_H_M_MoverMs.csv) to overlay on the plot",
+    )
+    parser.add_argument(
+        "--overlay-oommf-ms",
+        type=float,
+        default=None,
+        metavar="Ms",
+        help="Ms (A/m) to convert OOMMF normalized magnetization to kA/m (default: 800000)",
+    )
     
     args = parser.parse_args()
     
@@ -1099,6 +1235,11 @@ Examples:
     average_only = args.average_only
     backup_existing = args.backup
     clean_results = args.clean_results
+    # Set module-level overlay options
+    if args.overlay_oommf_easy is not None:
+        global OVERLAY_OOMMF_EASY_FILE, OVERLAY_OOMMF_MS
+        OVERLAY_OOMMF_EASY_FILE = args.overlay_oommf_easy
+        OVERLAY_OOMMF_MS = args.overlay_oommf_ms
     
     # Resolve paths relative to this script's directory
     run_dir = Path(__file__).resolve().parent
