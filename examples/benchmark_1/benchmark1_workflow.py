@@ -23,6 +23,12 @@ python benchmark1_workflow.py --minimal
 python benchmark1_workflow.py --repeats 10
 python benchmark1_workflow.py --minimal --repeats 3
 
+# Evaluate prior computed results without rerunning simulations
+# the --average-only flag skips Steps 1-3 and only computes averages + plots
+# the --grains and --extent flags must match the original simulation 
+# parameters and are used for labeling only
+python benchmark1_workflow.py --average-only --grains 8 --extent 80,80,80
+
 Configuration:
 ==============
 The workflow requires an isotrop.p2 file with hysteresis loop parameters:
@@ -48,13 +54,11 @@ import numpy as np
 try:
     import mammos_analysis
     import mammos_entity as me
-    import mammos_units as u  # noqa: F401 (units may be useful later)
+    import mammos_units as u
     _MAMMOS_ANALYSIS_AVAILABLE = True
 except Exception:
     _MAMMOS_ANALYSIS_AVAILABLE = False
 
-# TODO: Add logging instead of print statements for better control over output verbosity.
-#      For now, print statements are used for simplicity and clarity.
 
 # =============================================================================
 # STEP 1: MESH GENERATION
