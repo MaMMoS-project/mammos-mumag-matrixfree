@@ -32,7 +32,7 @@ python benchmark1_workflow.py --average-only --grains 8 --extent 80,80,80
 Configuration:
 ==============
 The workflow requires an isotrop.p2 file with hysteresis loop parameters:
-- Mesh size: 1.0e-9 μm
+- Mesh size: 2 nm (defined via mesh.py and Neper's characteristic length)
 - Initial state: mz=1 (saturated along z-axis)
 - Field sweep: 2.0 T → -2.0 T, step 0.01 T, direction: Hz
 - Minimizer: tol_fun=1e-10, tol_hmag_factor=1
