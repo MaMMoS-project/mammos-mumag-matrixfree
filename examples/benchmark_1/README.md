@@ -20,7 +20,7 @@ python benchmark1_workflow.py [--minimal] [--grains N] [--extent Lx,Ly,Lz] [--to
 ```
 
 ### Common Options
-- `--minimal` : Use minimal mesh extent (20×20×20 μm³) for fast testing
+- `--minimal` : Use minimal mesh extent (20×20×20 nm³) for fast testing
 - `--grains N` : Set custom grain count (default: 8)
 - `--extent Lx,Ly,Lz` : Set custom mesh extent (overrides --minimal)
 - `--tol X` : Numerical tolerance for generation (default: 0.01)

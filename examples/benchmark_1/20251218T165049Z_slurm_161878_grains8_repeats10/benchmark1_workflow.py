@@ -13,20 +13,26 @@ Step 4: Repeat Steps 1-3 multiple times and compute averaged hysteresis loop
 
 Usage:
 ======
-# Single run with full extent (80x80x80 μm³)
+# Single run with full extent (80x80x80 nm³)
 python benchmark1_workflow.py
 
-# Single run with minimal extent (20x20x20 μm³) for faster testing
+# Single run with minimal extent (20x20x20 nm³) for faster testing
 python benchmark1_workflow.py --minimal
 
 # Multiple runs with averaging (recommended for benchmarking)
 python benchmark1_workflow.py --repeats 10
 python benchmark1_workflow.py --minimal --repeats 3
 
+# Evaluate prior computed results without rerunning simulations
+# the --average-only flag skips Steps 1-3 and only computes averages + plots
+# the --grains and --extent flags must match the original simulation 
+# parameters and are used for labeling only
+python benchmark1_workflow.py --average-only --grains 8 --extent 80,80,80
+
 Configuration:
 ==============
 The workflow requires an isotrop.p2 file with hysteresis loop parameters:
-- Mesh size: 1.0e-9 μm
+- Mesh size: 2 nm (defined via mesh.py and Neper's characteristic length)
 - Initial state: mz=1 (saturated along z-axis)
 - Field sweep: 2.0 T → -2.0 T, step 0.01 T, direction: Hz
 - Minimizer: tol_fun=1e-10, tol_hmag_factor=1
@@ -48,13 +54,11 @@ import numpy as np
 try:
     import mammos_analysis
     import mammos_entity as me
-    import mammos_units as u  # noqa: F401 (units may be useful later)
+    import mammos_units as u
     _MAMMOS_ANALYSIS_AVAILABLE = True
 except Exception:
     _MAMMOS_ANALYSIS_AVAILABLE = False
 
-# TODO: Add logging instead of print statements for better control over output verbosity.
-#      For now, print statements are used for simplicity and clarity.
 
 # =============================================================================
 # STEP 1: MESH GENERATION
@@ -71,8 +75,8 @@ def step1_generate_mesh(
     
     Creates a polycrystalline mesh using Neper with:
     - Grain count: default 8 grains (override with grains_override)
-    - Minimal extent: 20x20x20 μm³ (for testing, faster)
-    - Full extent: 80x80x80 μm³ (for production benchmarks)
+    - Minimal extent: 20x20x20 nm³ (for testing, faster)
+    - Full extent: 80x80x80 nm³ (for production benchmarks)
     - Override: custom extent if extent_override is provided (e.g., "40,40,40")
     
     Output: isotrop_down/isotrop.npz (mesh file)
@@ -1615,8 +1619,8 @@ def main() -> int:
     
     Command-Line Arguments:
     -----------------------
-    --minimal        : Use minimal mesh extent (20×20×20 μm³, default 8 grains)
-                       Default: Full extent (80×80×80 μm³, default 8 grains)
+    --minimal        : Use minimal mesh extent (20×20×20 nm³, default 8 grains)
+                       Default: Full extent (80×80×80 nm³, default 8 grains)
     --grains N       : Override grain count (default: 8)
     --extent Lx,Ly,Lz: Override mesh extent (takes precedence over --minimal)
     --tol X          : Numerical tolerance for make_krn.py (default: 0.01)
@@ -1685,7 +1689,7 @@ Examples:
     parser.add_argument(
         "--minimal",
         action="store_true",
-        help="Use minimal mesh extent (20×20×20 μm³) for faster testing. Default: Full extent (80×80×80 μm³)",
+        help="Use minimal mesh extent (20×20×20 nm³) for faster testing. Default: Full extent (80×80×80 nm³)",
     )
     parser.add_argument(
         "--grains",
@@ -1763,7 +1767,7 @@ Examples:
     if extent_override:
         mesh_extent_str = f"Override ({extent_override})"
     else:
-        mesh_extent_str = 'Minimal (20×20×20 μm³)' if args.minimal else 'Full (80×80×80 μm³)'
+        mesh_extent_str = 'Minimal (20×20×20 nm³)' if args.minimal else 'Full (80×80×80 nm³)'
     print(f"  Mesh extent:  {mesh_extent_str}")
     grains_str = grains_override if grains_override is not None else 8
     print(f"  Grain count:  {grains_str}")
