@@ -102,6 +102,9 @@ echo "DIAGNOSTICS:"
 # export NEPEROPT="-gmsh $GMSH_BIN"
 
 # Copy required files
+cd $SIM_DIR
+echo "WORKING DIR:" $PWD
+
 echo "Copying project files to working directory..."
 cp -r $SLURM_SUBMIT_DIR/src .
 cp -r $SLURM_SUBMIT_DIR/resources .
@@ -110,8 +113,6 @@ cp -r $SLURM_SUBMIT_DIR/resources .
 # ============================================================================
 # RUN 
 # ============================================================================
-cd $SIM_DIR
-echo "WORKING DIR:" $PWD
 
 
 $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u src/loop.py --mesh resources/two_grains_interface/two_grains_interface.npz
