@@ -118,14 +118,17 @@ $PIXI_EXE run --manifest-path $SLURM_SUBMIT_DIR/pixi.toml python -u src/loop.py 
 
 
 # Clean up, remove working directory
+sleep 10 
+
 if [[ "$SIM_DIR" != "$SLURM_SUBMIT_DIR" ]]; then
   RESULT_DIR="$SLURM_SUBMIT_DIR"/results
   mkdir -p "$RESULT_DIR"
   cp -r "$SIM_DIR" "$RESULT_DIR"
-  mv "$SLURM_SUBMIT_DIR"/slurm-"$SLURM_JOB_ID".out  slurm-$SLURM_JOB_ID
-  cd $SLURM_SUBMIT_DIR
-  rm -r $SIM_DIR
+  mv "$SLURM_SUBMIT_DIR"/slurm-"$SLURM_JOB_ID".out  "$RESULT_DIR"/slurm-"$SLURM_JOB_ID"
+  cd "$SLURM_SUBMIT_DIR"
+  rm -r "$SIM_DIR"
 fi
+
 
 
 
