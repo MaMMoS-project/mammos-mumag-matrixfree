@@ -10,6 +10,7 @@ def convert_mesh(mesh_file: Path) -> None:
     mesh = meshio.read(mesh_file)
 
     knt = mesh.points
+    print(f"first five nodes:\n{knt[:10]}")
     tets = mesh.cells_dict.get(TETRA)
     if tets is None:
         raise RuntimeError("No tetra cells found in Neper output VTK.")
@@ -72,8 +73,44 @@ def convert_mesh(mesh_file: Path) -> None:
     # Build ijk (E,5): 4 indices + mat_id
     ijk = np.column_stack([tets, mat])
     out_npz = mesh_file.with_suffix(".npz")
+    print(knt.astype(np.float64))
+    print(ijk.astype(np.int32))
     np.savez(out_npz, knt=knt.astype(np.float64), ijk=ijk.astype(np.int32))
 
 
+def convert_med_to_npz(med_file: Path) -> None:
+    mesh = meshio.read(med_file)
+    print(f"Mesh info: {mesh}")
+    tet_idx = next(
+        i for i, cellblock in enumerate(mesh.cells) if cellblock.type == TETRA
+    )
+    print(f"Tetra cell block index: {tet_idx}")
+    knt = mesh.points
+    tets = mesh.cells_dict.get(TETRA)
+    print(f"Found {len(tets)} tetrahedral elements.")
+    print(f"Found {len(knt)} nodes.")
+    groups = mesh.cell_data["cell_tags"][tet_idx]
+    print(f"Cell data found: {np.unique(groups)}")
+    max_group_id = np.amax(groups) + 1
+    groups = np.add(
+        np.multiply(groups, -1),
+        max_group_id,
+    )
+    print(f"Cell data found: {np.unique(groups)}")
+    ijk = np.column_stack([tets, groups])
+    out_npz = med_file.with_suffix(".npz")
+    # print(knt.astype(np.float64))
+    # print(ijk.astype(np.int32))
+    np.savez(out_npz, knt=knt.astype(np.float64), ijk=ijk.astype(np.int32))
+
+
+def main():
+    # convert_mesh(Path("/home/david/repos/salome/results/box_grains/box_grains.vtk"))
+    # file = Path("examples/two_grains_interface/two_grains_interface.vtk")
+    # convert_mesh(file)
+    file = Path("examples/two_grains_interface/two_grains_interface.med")
+    convert_med_to_npz(file)
+
+
 if __name__ == "__main__":
-    convert_mesh(Path("/home/david/repos/salome/results/box_grains/box_grains.vtk"))
+    main()
