@@ -1041,6 +1041,7 @@ def make_valgrad_with_aux(ms_mode: str):
         Ms_lookup: jnp.ndarray,
         A_lookup_exchange: jnp.ndarray,
         K1_lookup: jnp.ndarray,
+        K_1p_lookup: Optional[jnp.ndarray],
         k_easy_e: jnp.ndarray,
         # Field & normalization
         H_ext: jnp.ndarray,
@@ -1140,7 +1141,7 @@ def make_valgrad_with_aux(ms_mode: str):
             m_nodes, geom, A_lookup=A_lookup_exchange
         )
         E_an, grad_m_an = uniaxial_anisotropy_energy_and_grad(
-            m_nodes, geom, K1_lookup, k_easy_e
+            m_nodes, geom, K1_lookup, k_easy_e, K_1p_lookup
         )
         E_z, grad_m_z = zeeman_energy_uniform_field_and_grad(
             m_nodes, geom, Ms_lookup, H_ext
@@ -1240,6 +1241,7 @@ def make_fun_for_jaxopt(
     Ms_lookup,
     A_lookup_exchange,
     K1_lookup,
+    K_1p_lookup,
     k_easy_e,
     H_ext,
     E_ref,
@@ -1271,6 +1273,7 @@ def make_fun_for_jaxopt(
             Ms_lookup,
             A_lookup_exchange,
             K1_lookup,
+            K_1p_lookup,
             k_easy_e,
             H_ext,
             E_ref,
@@ -1688,6 +1691,7 @@ def minimize_energy_lbfgs(
     Ms_lookup: jnp.ndarray,
     A_lookup_exchange: jnp.ndarray,
     K1_lookup: jnp.ndarray,
+    K_1p_lookup: Optional[jnp.ndarray],
     k_easy_e: jnp.ndarray,
     H_ext: jnp.ndarray,
     E_ref: jnp.ndarray,
@@ -1752,6 +1756,7 @@ def minimize_energy_lbfgs(
         Ms_lookup=Ms_lookup,
         A_lookup_exchange=A_lookup_exchange,
         K1_lookup=K1_lookup,
+        K_1p_lookup=K_1p_lookup,
         k_easy_e=k_easy_e,
         H_ext=H_ext,
         E_ref=E_ref,

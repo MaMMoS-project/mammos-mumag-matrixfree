@@ -1116,6 +1116,7 @@ def step7_demag_sweep(
                     Ms_lookup=materials.Ms_lookup,
                     A_lookup_exchange=materials.A_lookup_exchange,
                     K1_lookup=materials.K1_lookup,
+                    K_1p_lookup=materials.K_1p_lookup,
                     k_easy_e=materials.k_easy_e,
                     H_ext=H_ext,
                     E_ref=E_ref,

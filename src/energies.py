@@ -145,10 +145,11 @@ def uniaxial_anisotropy_energy_and_grad(
     geom: TetGeom,  # conn:(E,4), volume:(E,), mat_id:(E,)
     K1_lookup: jnp.ndarray,  # (G,)
     k_easy_e: jnp.ndarray,  # (E, 3) unit easy axis per element
+    K_1p_lookup: jnp.ndarray,  # (G,)
 ):
-    K1p_lookup = jnp.array([0.091995e6, 0.0])  # Ga4Mn8
+    # K1p_lookup = jnp.array([0.091995e6, 0.0])  # Ga4Mn8
     return orthorhombic_anisotropy_energy_and_grad_ip(
-        m_nodes, geom, K1_lookup, K1p_lookup, k_easy_e
+        m_nodes, geom, K1_lookup, K_1p_lookup, k_easy_e
     )
     """
     conn, Ve, mat_id = geom.conn, geom.volume, geom.mat_id
