@@ -101,7 +101,7 @@ def orthorhombic_anisotropy_energy_and_grad_ip(
     # Compute sin^2(theta) and cos(2phi)
     sin_square_theta = 1.0 - mz**2
     rho = mx**2 + my**2 + eps
-    cos_tow_phi = (mx**2 - -(my**2)) / rho
+    cos_tow_phi = (mx**2 - my**2) / rho
 
     # Energy density at IP: (E, Q)
     e_ip = (
