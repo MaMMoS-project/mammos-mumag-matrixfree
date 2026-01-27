@@ -4,6 +4,7 @@ jax-fem/
 examples/*
 resources/*
 logs/*
+results/*
 
 
 # ---> Python
