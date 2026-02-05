@@ -89,11 +89,11 @@ def orthorhombic_anisotropy_energy_and_grad_ip(
     # Compute sin^2(theta) and cos(2phi)
     sin_square_theta = 1.0 - mz**2
     rho = mx**2 + my**2 + eps
-    cos_tow_phi = (mx**2 - my**2) / rho
+    cos_two_phi = (mx**2 - my**2) / rho
 
     # Energy density at IP: (E, Q)
     e_ip = (
-        K1p_e[:, None] * cos_tow_phi * sin_square_theta
+        K1p_e[:, None] * cos_two_phi * sin_square_theta
         + K1_e[:, None] * sin_square_theta
     )
 
@@ -107,7 +107,7 @@ def orthorhombic_anisotropy_energy_and_grad_ip(
 
     de_dmx = K1p_e[:, None] * (sin_square_theta * dcos2_dmx)
     de_dmy = K1p_e[:, None] * (sin_square_theta * dcos2_dmy)
-    de_dmz = K1p_e[:, None] * (cos_tow_phi * ds_dmz) + K1_e[:, None] * ds_dmz
+    de_dmz = K1p_e[:, None] * (cos_two_phi * ds_dmz) + K1_e[:, None] * ds_dmz
 
     grad_ip = jnp.stack([de_dmx, de_dmy, de_dmz], axis=-1)  # (E, Q, 3)
 
