@@ -1299,6 +1299,10 @@ def step7_demag_sweep(
 
 # ---------------------------------- CLI --------------------------------------
 def main():
+    log_dir = Path("./log").resolve()
+    if not log_dir.exists():
+        log_dir.mkdir(parents=True)
+    jax.profiler.start_trace(log_dir)
     ap = argparse.ArgumentParser(
         description="Micromagnetics (Steps 1–7) with two-loop L-BFGS."
     )
@@ -1683,6 +1687,7 @@ def main():
         print(f"[Step 7] Sweep finished. Appended results to {base}.dat")
     elif args.no_demag:
         print("\n[info] Demagnetization sweep disabled by --no-demag")
+    jax.profiler.stop_trace()
 
 
 def main_cli():  # keep entrypoint name explicit

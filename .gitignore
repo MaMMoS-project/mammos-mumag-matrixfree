@@ -5,6 +5,7 @@ examples/*
 resources/*
 logs/*
 results/*
+log
 
 
 # ---> Python
