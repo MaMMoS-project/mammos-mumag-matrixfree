@@ -68,12 +68,6 @@ def orthorhombic_anisotropy_energy_and_grad_ip(
     K1p_e = K1p_lookup[g_ids]  # (E,)
 
     # Gather nodal magnetization per element: (E, 4, 3)
-
-    print("x" * 35)
-    print(conn)
-    # jax.debug.print("conn : {conn}", conn=conn)
-    print(f"shape of m_nodes: {m_nodes.shape}")
-    print(f"shape of conn: {conn.shape}")
     m_e = m_nodes[conn]
     # Quadrature: 4-point barycentric coords and weights
     ip_bary = jnp.array(
@@ -85,19 +79,13 @@ def orthorhombic_anisotropy_energy_and_grad_ip(
         ]
     )  # (Q=4, 4)
     ip_weights = jnp.array([0.25, 0.25, 0.25, 0.25])  # (Q,)
-    print()
     m_ip = jnp.einsum("qa,eac->eqc", ip_bary, m_e)
-    print(f"shape of m_ip: {m_ip.shape}")
     m_local = jnp.einsum("eij,eaj->eai", rotation_matrix_e, m_ip)
-    print(f"shape of m_local: {m_local.shape}")
     # Interpolate magnetization at integration points: (E, Q, 3)
 
     mx, my, mz = m_local[..., 0], m_local[..., 1], m_local[..., 2]
     eps = 1e-12
 
-    print("x" * 35)
-    # jax.debug.print("mz : {mz}", mz=mz)
-    print("x" * 35)
     # Compute sin^2(theta) and cos(2phi)
     sin_square_theta = 1.0 - mz**2
     rho = mx**2 + my**2 + eps
