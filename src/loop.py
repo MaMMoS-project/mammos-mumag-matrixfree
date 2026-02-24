@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import sys
 import time
 import csv
+
 from magnetostatics import (
     prepare_shells_and_geom,
     p2_path_for_mesh,
@@ -1299,10 +1300,13 @@ def step7_demag_sweep(
 
 # ---------------------------------- CLI --------------------------------------
 def main():
+    options = jax.profiler.ProfileOptions()
+    options.python_tracer_level = 1
+    options.host_tracer_level = 3
     log_dir = Path("./log").resolve()
     if not log_dir.exists():
         log_dir.mkdir(parents=True)
-    jax.profiler.start_trace(log_dir)
+    jax.profiler.start_trace(log_dir, profiler_options=options)
     ap = argparse.ArgumentParser(
         description="Micromagnetics (Steps 1–7) with two-loop L-BFGS."
     )
