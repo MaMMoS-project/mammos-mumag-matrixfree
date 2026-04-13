@@ -958,7 +958,7 @@ def step7_demag_sweep(
 
     h_vals = _h_schedule(field.hstart, field.hfinal, field.hstep)
     dat_path = f"{basename}.dat"
-    vtu_index = 0
+    vtu_index = -1
     # If we resume from a numbered state, continue VTU numbering from there.
     # (We increment before writing, so starting from the resume index will produce
     # resume_index + 1 for the next output.)
@@ -1169,7 +1169,6 @@ def step7_demag_sweep(
             or (hmag == h_vals[-1])
             or (abs(hmag) < 1e-12)
         )
-        vtu_written_id = 0
         if write_now:
             vtu_index += 1
             if ms_mode == "A":
@@ -1196,7 +1195,6 @@ def step7_demag_sweep(
                 B_elems=B_e,
                 index=vtu_index,
             )
-            vtu_written_id = vtu_index
             last_MH_mu0 = MH_mu0
             # Persist state at the same index as the VTU
             try:
@@ -1225,7 +1223,7 @@ def step7_demag_sweep(
         # ---- .dat output
         with open(dat_path, "a", encoding="utf-8") as f:
             f.write(
-                f"{vtu_written_id:03d} "
+                f"{vtu_index:03d} "
                 f"{float(hmag * MU0):13.6e} {float(MH * MU0):12.5e} "
                 f"{float(Mx * MU0):10.3e} {float(My * MU0):10.3e} {float(Mz * MU0):10.3e} "
                 f"{E_density:10.3e} {S_density:10.3e} {Ex_density:10.3e} {An_density:10.3e} {Ze_density:10.3e}\n"
