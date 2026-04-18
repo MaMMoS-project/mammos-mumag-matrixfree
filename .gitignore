@@ -1,0 +1,9 @@
+# Pixi
+.pixi
+pixi.lock
+
+# Python
+__pycache__
+
+# Notebooks
+.ipynb_checkpoints
