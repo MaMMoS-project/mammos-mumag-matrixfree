@@ -28,7 +28,7 @@ def test_switch_sphere(data_dir, loop_bin, mesh_bin, tmp_path):
 
     # generate mesh
     cmd = shlex.split(
-        f"{mesh_bin} --geom ellipsoid --extent 12,12,12 --h 0.5 "
+        f"{mesh_bin} --geom ellipsoid --extent 12,12,12 --h 1.0 "
         "--backend meshpy --out-name sphere"
     )
     res = subprocess.run(
@@ -70,7 +70,7 @@ def test_switch_oblate_ellipsoid(data_dir, loop_bin, mesh_bin, tmp_path):
 
     # generate mesh
     cmd = shlex.split(
-        f"{mesh_bin} --geom ellipsoid --extent 6,6,3 --h 0.3 "
+        f"{mesh_bin} --geom ellipsoid --extent 6,6,3 --h 0.5 "
         "--backend meshpy --out-name ellipsoid"
     )
     res = subprocess.run(
@@ -113,7 +113,7 @@ def test_switch_prolate_ellipsoid(data_dir, loop_bin, mesh_bin, tmp_path):
 
     # generate mesh
     cmd = shlex.split(
-        f"{mesh_bin} --geom ellipsoid --extent 3,3,6 --h 0.3 "
+        f"{mesh_bin} --geom ellipsoid --extent 3,3,6 --h 0.5 "
         "--backend meshpy --out-name ellipsoid"
     )
     res = subprocess.run(
