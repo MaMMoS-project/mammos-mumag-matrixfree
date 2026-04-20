@@ -482,13 +482,17 @@ def mesh_backend_meshpy_elliptic_cylinder(
     opts.regionattrib = True
     opts.verbose = bool(verbose)
 
-    tet_build(
+    mesh = tet_build(
         mi,
         options=opts,
         attributes=True,
         volume_constraints=True,
         verbose=bool(verbose),
     )
+    knt = np.asarray(mesh.points, dtype=np.float64)
+    tets = np.asarray(mesh.elements, dtype=np.int32)
+    ijk = np.hstack([tets, np.ones((tets.shape[0], 1), dtype=np.int32)])
+    return knt, ijk
 
 
 
