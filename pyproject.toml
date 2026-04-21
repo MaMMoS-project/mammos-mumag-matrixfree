@@ -1,0 +1,150 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mammos-mumag-matrixfree"
+version = "0.1.0"
+authors = [
+  { name = "Wilfried Hortschitz" },
+  { name = "Thomas Schrefl" },
+  { name = "Santa Pile" },
+  { name = "Andrea Petrocchi" },
+  { name = "Swapneel Amit Pathak" },
+  { name = "Samuel Holt" },
+  { name = "Martin Lang" },
+  { name = "Michael Adams" },
+  { name = "Hans Fangohr" },
+]
+description = "Finite element matrix-free micromagnetic simulation tool."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+  "Intended Audience :: Developers",
+  "Intended Audience :: Education",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3 :: Only",
+  'Topic :: Scientific/Engineering :: Physics',
+]
+requires-python = ">=3.11"
+dependencies = [
+  "gmsh>=4.8.0,<5",
+  "jax",
+  "jaxopt",
+  "matplotlib",
+  "mammos-analysis>=0.3.0,<0.5",
+  "mammos-entity>=0.11.1,<0.12",
+  "meshio>=5.3.5,<6",
+  "meshpy>=2025.1.1,<2026",
+  "numpy",
+  "pyamg>=5.3.0,<6",
+  "scipy",
+]
+
+[project.optional-dependencies]
+cuda = [
+  "jax[cuda]",
+]
+
+[project.urls]
+Homepage = "https://MaMMoS-project.github.io"
+Documentation = "https://mammos-project.github.io/mammos"
+Repository = "https://github.com/MaMMoS-project/mammos-mumag-matrixfree"
+Issues = "https://github.com/MaMMoS-project/mammos-mumag-matrixfree/issues"
+Changelog = "https://mammos-project.github.io/mammos/changelog"
+
+[tool.ruff]
+target-version = "py311"
+exclude = [
+  "src/mammos_mumag_matrixfree/core",
+  "dev",
+  "examples",  # TODO: cleanup examples
+  "run_example.py",  # TODO: cleanup run_example.py
+]
+[tool.ruff.lint]
+select = [
+  "B",   # flake8-bugbear
+  "D",   # pydocstyle
+  "E",   # pycodestyle
+  "F",   # Pyflakes
+  "I",   # isort
+  "SIM", # flake8-simplify
+  "UP",  # pyupgrade
+]
+isort.known-local-folder = [ "src/mammos_mumag_matrixfree" ]
+pydocstyle.convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"*.ipynb" = ["B018"]  # "Found useless expression. Either assign it to a variable or remove it."; false positives when using implicit __repr__ in the notebook
+"tests/*" = ["D100", "D103"]  # do not enforce docstrings in tests
+
+[tool.pixi.workspace]
+channels = [ "conda-forge", "set3mah" ]
+platforms = [ "linux-64" ]
+
+[tool.pixi.dependencies]
+python = "==3.11"
+hatch = "*"
+ipython = "*"
+jupyterlab = ">3"
+nbval = "*"
+neper = ">=4.6.0,<5"
+packaging = "<25"
+povray = ">=3.7.0.8,<4"
+pre-commit = "*"
+pytest = "*"
+ruff = "*"
+towncrier = "*"
+
+[tool.pixi.pypi-dependencies]
+mammos-mumag-matrixfree = { path = ".", editable = true }
+
+[tool.pixi.tasks]
+examples = "jupyter-lab examples"
+test-unittest = "pytest -v tests"
+test-docstrings = "pytest -v --doctest-modules src/mammos_mumag_matrixfree"
+test-notebooks = "pytest -v --nbval-lax examples"
+test-all = { depends-on = ["test-unittest", "test-docstrings", "test-notebooks"] }
+style = "pre-commit run --all-files"
+
+[tool.pixi.environments]
+cuda = {features = ["cuda"]}
+
+[tool.towncrier]
+directory = "changes"
+filename = "CHANGELOG.md"
+package = "mammos_mumag_matrixfree"
+title_format = "## [mammos-mumag-matrixfree {version}](https://github.com/MaMMoS-project/mammos-mumag-matrixfree/tree/{version}) – {project_date}"
+# point to PRs instead of issues; CI ensures that the correct PR numbers exist
+issue_format = "[#{issue}](https://github.com/MaMMoS-project/mammos-mumag-matrixfree/pull/{issue})"
+
+[[tool.towncrier.type]]
+directory = "added"
+name = "Added"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "changed"
+name = "Changed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "deprecated"
+name = "Deprecated"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "removed"
+name = "Removed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "fixed"
+name = "Fixed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "misc"
+name = "Misc"
+showcontent = true

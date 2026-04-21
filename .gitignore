@@ -1,9 +1,11 @@
-# Pixi
 .pixi
 pixi.lock
 
-# Python
 __pycache__
 
-# Notebooks
+build
+dist
+*.egg-info
+
 .ipynb_checkpoints
+
