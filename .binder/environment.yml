@@ -1,0 +1,11 @@
+name: mybinder-env
+channels:
+  - conda-forge
+  - set3mah
+dependencies:
+  - python=3.11
+  - pip
+  - neper>=4.6.0
+  - povray>=3.7.0.8
+  - pip:
+      - mammos-mumag-matrixfree
