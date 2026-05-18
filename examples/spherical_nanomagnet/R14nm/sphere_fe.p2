@@ -1,0 +1,21 @@
+[mesh]
+size = 1.0e-9
+
+[initial state]
+mx = 0.0
+my = 0.0
+mz = 1.0
+
+[field]
+hstart = 1.0
+hfinal = -1.0
+hstep = -0.01
+hx = 0.0174524064
+hy = 0.0
+hz = 0.9998476952
+mstep = 0.01
+mfinal = -3.0
+
+[minimizer]
+tol_fun = 1e-19
+tol_hmag_factor = 1
