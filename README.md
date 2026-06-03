@@ -88,7 +88,7 @@ The field direction is set from `(hx, hy, hz)` and normalized; the sweep runs ma
 ### Required input files
 
 #### (a) BODY mesh (`.npz`)
-A body‑only tetrahedral mesh saved as NPZ; the shelling (air layers) is generated in memory. The module reads `mesh.npz`, looks for a sidecar `mesh.p2` (see below), then creates shells using `run_add_shell_pipeline(..., K, KL, auto_layers=True)`, and finally assembles a canonical `TetGeom` (connectivity, gradients, volumes, material IDs). You do **not** need to pre‑mesh air. citeturn1search2
+A body‑only tetrahedral mesh saved as NPZ; the shelling (air layers) is generated in memory. The module reads `mesh.npz`, looks for a sidecar `mesh.p2` (see below), then creates shells using `run_add_shell_pipeline(..., K, KL, auto_layers=True)`, and finally assembles a canonical `TetGeom` (connectivity, gradients, volumes, material IDs). You do **not** need to pre‑mesh air. 
 
 #### (b) Mesh parameters and sweep (`.p2` INI file)
 A simple INI file next to the mesh, same basename. Sections and keys used:
@@ -264,9 +264,9 @@ At each external field step the code minimizes the **total energy**
 
 `E = S[m,A(m)] + E_ex[m] + E_an[m] + E_Zeeman[m; H_ext]`,
 
-with the unit‑length constraint enforced by parameterizing an unconstrained vector `u_raw` per node and projecting to `m = u/||u||`. The gradient is mapped back to `u_raw` using the tangent‑plane projector `(I − m mᵀ)` (chain rule). citeturn1search1
+with the unit‑length constraint enforced by parameterizing an unconstrained vector `u_raw` per node and projecting to `m = u/||u||`. The gradient is mapped back to `u_raw` using the tangent‑plane projector `(I − m mᵀ)` (chain rule).
 
-The outer optimizer is **two‑loop L‑BFGS** (`jaxopt.LBFGS`), where the initial inverse‑Hessian seed `H₀` is configurable: scalar γ (from last curvature pair), Barzilai–Borwein (`bb/bb1/bb2`), identity, or physics‑informed diagonal / block‑Jacobi operators assembled from exchange and anisotropy surrogates on the tangent space. A custom line search is used with several initialization strategies. citeturn1search1
+The outer optimizer is **two‑loop L‑BFGS** (`jaxopt.LBFGS`), where the initial inverse‑Hessian seed `H₀` is configurable: scalar γ (from last curvature pair), Barzilai–Borwein (`bb/bb1/bb2`), identity, or physics‑informed diagonal / block‑Jacobi operators assembled from exchange and anisotropy surrogates on the tangent space. A custom line search is used with several initialization strategies.
 
 To improve scaling across fields, the energy returned to the optimizer is normalized by a reference `E_ref` (Brown energy at the initial state), but all outputs also retain physical units when written (e.g., fields multiplied by μ₀ when exporting). 
 
